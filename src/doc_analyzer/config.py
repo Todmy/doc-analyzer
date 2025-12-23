@@ -168,21 +168,23 @@ def _get_config_file_path() -> Path | None:
 
     Priority:
     1. DOC_ANALYZER_CONFIG env var
-    2. Bundled config (for frozen executables)
-    3. ~/.doc-analyzer/config.yaml
+    2. ~/.doc-analyzer/config.yaml (user config - highest priority for saved settings)
+    3. Bundled config (for frozen executables - fallback defaults)
     """
     env_path = os.getenv("DOC_ANALYZER_CONFIG")
     if env_path:
         return Path(env_path)
 
-    # Check for bundled config (PyInstaller frozen executable)
+    # User config takes priority (where API key gets saved)
+    if DEFAULT_CONFIG_FILE.exists():
+        return DEFAULT_CONFIG_FILE
+
+    # Fall back to bundled config (PyInstaller frozen executable)
     if is_frozen():
         bundled_config = get_bundle_dir() / "config.yaml"
         if bundled_config.exists():
             return bundled_config
 
-    if DEFAULT_CONFIG_FILE.exists():
-        return DEFAULT_CONFIG_FILE
     return None
 
 

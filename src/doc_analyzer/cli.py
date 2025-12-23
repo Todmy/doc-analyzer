@@ -2,24 +2,50 @@
 
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 from . import __version__
-from .analyzer import analyze_pairs, test_claude_cli
-from .anomaly import detect_anomalies
-from .cache import clear_cache, embed_with_cache, embed_with_cache_async, get_cache_stats
-from .clusterer import cluster_statements, get_cluster_keywords
 from .config import Config, init_config, show_config, ensure_api_key
-from .embedder import embed_statements, embed_statements_async, close_async_client, test_connection
-from .models import AnalysisReport
-from .parser import parse_documents, get_file_stats
-from .reporter import generate_report, save_report
-from .similarity import find_similar_pairs
-from .stats import calculate_stats, format_stats_summary
+
+# Lazy imports for heavy modules (sklearn, numpy) - only loaded when needed
+# This makes `doc-analyzer --help` fast
+if TYPE_CHECKING:
+    from .analyzer import analyze_pairs, test_claude_cli
+    from .anomaly import detect_anomalies
+    from .cache import clear_cache, embed_with_cache, embed_with_cache_async, get_cache_stats
+    from .clusterer import cluster_statements, get_cluster_keywords
+    from .embedder import embed_statements, embed_statements_async, close_async_client, test_connection
+    from .models import AnalysisReport
+    from .parser import parse_documents, get_file_stats
+    from .reporter import generate_report, save_report
+    from .similarity import find_similar_pairs
+    from .stats import calculate_stats, format_stats_summary
+
+
+def _import_heavy_modules():
+    """Import heavy modules lazily."""
+    global analyze_pairs, test_claude_cli, detect_anomalies
+    global clear_cache, embed_with_cache, embed_with_cache_async, get_cache_stats
+    global cluster_statements, get_cluster_keywords
+    global embed_statements, embed_statements_async, close_async_client, test_connection
+    global AnalysisReport, parse_documents, get_file_stats
+    global generate_report, save_report, find_similar_pairs
+    global calculate_stats, format_stats_summary
+
+    from .analyzer import analyze_pairs, test_claude_cli
+    from .anomaly import detect_anomalies
+    from .cache import clear_cache, embed_with_cache, embed_with_cache_async, get_cache_stats
+    from .clusterer import cluster_statements, get_cluster_keywords
+    from .embedder import embed_statements, embed_statements_async, close_async_client, test_connection
+    from .models import AnalysisReport
+    from .parser import parse_documents, get_file_stats
+    from .reporter import generate_report, save_report
+    from .similarity import find_similar_pairs
+    from .stats import calculate_stats, format_stats_summary
 
 app = typer.Typer(
     name="doc-analyzer",
@@ -48,6 +74,7 @@ def analyze(
     config_file: Optional[Path] = typer.Option(None, "--config", "-c", help="Config file path"),
 ):
     """Run full document analysis."""
+    _import_heavy_modules()
     config = Config.load(config_file)
     config = ensure_api_key(config)
     config.analysis.similarity_threshold = threshold

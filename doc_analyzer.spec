@@ -12,12 +12,22 @@ Output:
 """
 
 import sys
+import site
 from pathlib import Path
 
 block_cipher = None
 
 # Project root
 PROJECT_ROOT = Path(SPECPATH)
+
+# Find scipy dylibs (needed for FORTRAN libraries)
+scipy_dylibs = []
+for site_pkg in site.getsitepackages():
+    dylib_dir = Path(site_pkg) / 'scipy' / '.dylibs'
+    if dylib_dir.exists():
+        for dylib in dylib_dir.glob('*.dylib'):
+            scipy_dylibs.append((str(dylib), '.'))
+        break
 
 # Data files to bundle (config.yaml embedded in executable)
 datas = [
@@ -27,7 +37,7 @@ datas = [
 a = Analysis(
     [str(PROJECT_ROOT / 'src' / 'doc_analyzer' / '__main__.py')],
     pathex=[str(PROJECT_ROOT / 'src')],
-    binaries=[],
+    binaries=scipy_dylibs,
     datas=datas,
     hiddenimports=[
         'doc_analyzer',
