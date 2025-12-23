@@ -1,0 +1,39 @@
+# Documents to analyze
+documents:
+  path: ../../docs
+  extensions:
+    - .md
+    - .txt
+    - .json
+
+openrouter:
+  api_key: ${OPENROUTER_API_KEY}
+  embedding_model: openai/text-embedding-3-small
+  base_url: https://openrouter.ai/api/v1
+
+analysis:
+  similarity_threshold: 0.75
+  max_pairs_to_analyze: 100
+  skip_same_file: true
+  min_statement_length: 50
+
+# Anomaly detection (hybrid ensemble)
+anomaly:
+  method: ensemble  # ensemble, isolation_forest, lof, hdbscan
+  contamination: 0.05  # Expected proportion of anomalies (5%)
+  ensemble_weights: [0.4, 0.4, 0.2]  # IF, LOF, HDBSCAN
+  min_methods_agree: 2  # Minimum methods that must flag for ensemble
+  lof_neighbors: 20  # Number of neighbors for LOF
+  isolation_forest_estimators: 100  # Number of trees for IF
+
+claude:
+  command: claude
+  args:
+    - --print
+    - -p
+  timeout: 30
+
+output:
+  format: markdown
+  group_by: severity
+  include_non_contradictions: false
