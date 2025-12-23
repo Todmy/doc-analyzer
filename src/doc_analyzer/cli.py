@@ -213,6 +213,7 @@ def contradictions(
     config_file: Optional[Path] = typer.Option(None, "--config", "-c"),
 ):
     """Find contradictions only."""
+    _import_heavy_modules()
     config = Config.load(config_file)
     config = ensure_api_key(config)
     docs_path = path or Path(config.documents.path)
@@ -272,6 +273,7 @@ def anomalies(
     config_file: Optional[Path] = typer.Option(None, "--config", "-c"),
 ):
     """Detect anomalies using hybrid ensemble approach."""
+    _import_heavy_modules()
     config = Config.load(config_file)
     config = ensure_api_key(config)
     docs_path = path or Path(config.documents.path)
@@ -340,6 +342,7 @@ def stats(
     config_file: Optional[Path] = typer.Option(None, "--config", "-c"),
 ):
     """Show statistics only."""
+    _import_heavy_modules()
     config = Config.load(config_file)
     config = ensure_api_key(config)
     docs_path = path or Path(config.documents.path)
@@ -390,6 +393,7 @@ def clusters(
     config_file: Optional[Path] = typer.Option(None, "--config", "-c"),
 ):
     """Show topic clusters."""
+    _import_heavy_modules()
     config = Config.load(config_file)
     config = ensure_api_key(config)
     docs_path = path or Path(config.documents.path)
@@ -484,6 +488,7 @@ def config_test(
     config_file: Optional[Path] = typer.Option(None, "--config", "-c"),
 ):
     """Test API connections."""
+    _import_heavy_modules()
     config = Config.load(config_file)
 
     # Test OpenRouter
@@ -505,6 +510,7 @@ def config_test(
 @app.command("cache-clear")
 def cache_clear():
     """Clear embedding cache."""
+    _import_heavy_modules()
     deleted = clear_cache()
     console.print(f"[green]Cleared {deleted} cached embeddings[/green]")
 
@@ -512,6 +518,7 @@ def cache_clear():
 @app.command("cache-stats")
 def cache_stats():
     """Show cache statistics."""
+    _import_heavy_modules()
     stats = get_cache_stats()
     console.print(f"Cache directory: {stats['cache_dir']}")
     console.print(f"Total entries: {stats['total_entries']}")
