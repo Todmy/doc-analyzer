@@ -26,8 +26,11 @@ if TYPE_CHECKING:
     from .stats import calculate_stats, format_stats_summary
 
 
+_modules_loaded = False
+
 def _import_heavy_modules():
-    """Import heavy modules lazily."""
+    """Import heavy modules lazily with loading indicator."""
+    global _modules_loaded
     global analyze_pairs, test_claude_cli, detect_anomalies
     global clear_cache, embed_with_cache, embed_with_cache_async, get_cache_stats
     global cluster_statements, get_cluster_keywords
@@ -36,16 +39,22 @@ def _import_heavy_modules():
     global generate_report, save_report, find_similar_pairs
     global calculate_stats, format_stats_summary
 
-    from .analyzer import analyze_pairs, test_claude_cli
-    from .anomaly import detect_anomalies
-    from .cache import clear_cache, embed_with_cache, embed_with_cache_async, get_cache_stats
-    from .clusterer import cluster_statements, get_cluster_keywords
-    from .embedder import embed_statements, embed_statements_async, close_async_client, test_connection
-    from .models import AnalysisReport
-    from .parser import parse_documents, get_file_stats
-    from .reporter import generate_report, save_report
-    from .similarity import find_similar_pairs
-    from .stats import calculate_stats, format_stats_summary
+    if _modules_loaded:
+        return
+
+    with console.status("[dim]Loading...[/dim]"):
+        from .analyzer import analyze_pairs, test_claude_cli
+        from .anomaly import detect_anomalies
+        from .cache import clear_cache, embed_with_cache, embed_with_cache_async, get_cache_stats
+        from .clusterer import cluster_statements, get_cluster_keywords
+        from .embedder import embed_statements, embed_statements_async, close_async_client, test_connection
+        from .models import AnalysisReport
+        from .parser import parse_documents, get_file_stats
+        from .reporter import generate_report, save_report
+        from .similarity import find_similar_pairs
+        from .stats import calculate_stats, format_stats_summary
+
+    _modules_loaded = True
 
 app = typer.Typer(
     name="doc-analyzer",
