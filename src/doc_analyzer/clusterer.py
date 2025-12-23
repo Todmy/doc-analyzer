@@ -82,6 +82,7 @@ def _cluster_hdbscan(
         min_cluster_size=min_size,
         min_samples=1,
         metric="euclidean",
+        copy=True,
     )
     labels = hdbscan.fit_predict(embeddings)
 
