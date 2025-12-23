@@ -3,9 +3,7 @@
 import json
 import re
 import subprocess
-from typing import Any
-
-from rich.progress import Progress, TaskID
+from typing import Any, Callable
 
 from .config import Config
 from .models import (
@@ -26,8 +24,7 @@ def analyze_pairs(
     pairs: list[SimilarPair],
     statements: list[Statement],
     config: Config,
-    progress: Progress | None = None,
-    task_id: TaskID | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[ContradictionResult]:
     """Analyze pairs for contradictions using Claude CLI.
 
@@ -35,17 +32,20 @@ def analyze_pairs(
         pairs: List of similar pairs to check
         statements: All statements (for lookup)
         config: Configuration object
-        progress: Optional rich Progress
-        task_id: Optional task ID
+        progress_callback: Optional callback(current, total) for progress updates
 
     Returns:
         List of ContradictionResult objects
     """
     results: list[ContradictionResult] = []
+    total = len(pairs)
 
-    for pair in pairs:
+    for i, pair in enumerate(pairs, 1):
         stmt_a = statements[pair.idx_a]
         stmt_b = statements[pair.idx_b]
+
+        if progress_callback:
+            progress_callback(i, total)
 
         try:
             result = analyze_pair(stmt_a, stmt_b, pair.similarity, config)
@@ -53,9 +53,6 @@ def analyze_pairs(
         except AnalysisError:
             # Skip failed analyses
             pass
-
-        if progress and task_id is not None:
-            progress.update(task_id, advance=1)
 
     # Filter to only contradictions if configured
     if not config.output.include_non_contradictions:

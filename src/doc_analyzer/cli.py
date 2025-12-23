@@ -6,7 +6,6 @@ from typing import Optional, TYPE_CHECKING
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 from . import __version__
 from .config import Config, init_config, show_config, ensure_api_key
@@ -148,9 +147,10 @@ def analyze(
     # Analyze contradictions
     contradictions = []
     if not no_contradictions and not dry_run and pairs:
-        console.print(f"[dim]Analyzing {len(pairs)} pairs with Claude...[/dim]")
-        contradictions = analyze_pairs(pairs, statements, config)
-        console.print(f"[green]✓[/green] Found {len(contradictions)} contradictions")
+        def progress_callback(current: int, total: int):
+            console.print(f"[dim]Analyzing pairs... {current}/{total}[/dim]", end="\r")
+        contradictions = analyze_pairs(pairs, statements, config, progress_callback=progress_callback)
+        console.print(f"[green]✓[/green] Found {len(contradictions)} contradictions     ")
 
     # Detect anomalies
     anomalies = []
@@ -220,8 +220,9 @@ def contradictions(
 
     # Analyze contradictions
     if pairs:
-        console.print(f"[dim]Analyzing {len(pairs)} pairs with Claude...[/dim]")
-        results = analyze_pairs(pairs, statements, config)
+        def progress_callback(current: int, total: int):
+            console.print(f"[dim]Analyzing pairs... {current}/{total}[/dim]", end="\r")
+        results = analyze_pairs(pairs, statements, config, progress_callback=progress_callback)
     else:
         results = []
 
@@ -496,29 +497,24 @@ def interactive_mode(
         console.print("[red]No statements found in documents[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+    console.print(f"[green]✓[/green] Found {len(statements)} statements")
 
-    # Generate embeddings with progress
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        console=console,
-        transient=False,
-    ) as progress:
-        task = progress.add_task("Generating embeddings...", total=len(statements))
+    # Generate embeddings
+    console.print("[dim]Generating embeddings...[/dim]")
 
+    async def run_async_embeddings():
         async def embed_fn_async(stmts):
-            return await embed_statements_async(stmts, config, progress=progress, task_id=task)
-
-        embeddings = asyncio.run(embed_with_cache_async(
+            return await embed_statements_async(stmts, config)
+        result = await embed_with_cache_async(
             statements, embed_fn_async, config.openrouter.embedding_model,
-            progress=progress, task_id=task
-        ))
-        asyncio.run(close_async_client())
+        )
+        await close_async_client()
+        return result
 
-    console.print("[dim]Clustering...[/dim]")
+    embeddings = asyncio.run(run_async_embeddings())
+    console.print(f"[green]✓[/green] Generated embeddings")
+
+    console.print("[dim]Clustering...[/dim]", end="\r")
     clusters = cluster_statements(embeddings)
 
     console.print(f"\n[green]Ready![/green] {len(statements)} statements, {clusters.n_clusters} clusters\n")
@@ -579,42 +575,48 @@ def interactive_mode(
                 console.print(f"[dim]...and {len(results) - 10} more[/dim]")
 
         elif cmd == "contradictions":
-            with console.status("Finding similar pairs..."):
-                pairs = find_similar_pairs(
-                    embeddings, statements,
-                    threshold=config.analysis.similarity_threshold,
-                    max_pairs=config.analysis.max_pairs_to_analyze
-                )
+            console.print("[dim]Finding similar pairs...[/dim]", end="\r")
+            pairs = find_similar_pairs(
+                embeddings, statements,
+                threshold=config.analysis.similarity_threshold,
+                max_pairs=config.analysis.max_pairs_to_analyze
+            )
             if not pairs:
                 console.print("[yellow]No similar pairs found[/yellow]")
                 continue
-            console.print(f"[dim]Analyzing {len(pairs)} pairs with Claude...[/dim]")
-            with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
-                task = progress.add_task(f"Analyzing...", total=len(pairs))
-                results = analyze_pairs(pairs, statements, config, progress, task)
+            console.print(f"[green]✓[/green] Found {len(pairs)} similar pairs       ")
+            def progress_cb(current: int, total: int):
+                console.print(f"[dim]Analyzing pairs... {current}/{total}[/dim]", end="\r")
+            results = analyze_pairs(pairs, statements, config, progress_callback=progress_cb)
+            console.print(f"[green]✓[/green] Analyzed {len(pairs)} pairs               ")
             console.print(f"\n[bold]Found {len(results)} contradictions[/bold]\n")
             for i, c in enumerate(results[:10], 1):
                 console.print(f"[yellow]{i}. {c.severity.value.upper()}[/yellow] ({c.confidence:.0%})")
                 console.print(f"   {c.explanation}\n")
 
         elif cmd == "analyze":
-            console.print("[dim]Running full analysis...[/dim]")
-            # Similar pairs
+            console.print("[dim]Finding similar pairs...[/dim]", end="\r")
             pairs = find_similar_pairs(
                 embeddings, statements,
                 threshold=config.analysis.similarity_threshold,
                 max_pairs=config.analysis.max_pairs_to_analyze
             )
+            console.print(f"[green]✓[/green] Found {len(pairs)} similar pairs       ")
             # Contradictions
             contradictions = []
             if pairs:
-                with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
-                    task = progress.add_task("Analyzing contradictions...", total=len(pairs))
-                    contradictions = analyze_pairs(pairs, statements, config, progress, task)
+                def progress_cb2(current: int, total: int):
+                    console.print(f"[dim]Analyzing pairs... {current}/{total}[/dim]", end="\r")
+                contradictions = analyze_pairs(pairs, statements, config, progress_callback=progress_cb2)
+                console.print(f"[green]✓[/green] Found {len(contradictions)} contradictions     ")
             # Anomalies
+            console.print("[dim]Detecting anomalies...[/dim]", end="\r")
             anomalies = detect_anomalies(embeddings, statements, clusters, config.anomaly)
+            console.print(f"[green]✓[/green] Found {len(anomalies)} anomalies          ")
             # Stats
+            console.print("[dim]Calculating statistics...[/dim]", end="\r")
             statistics = calculate_stats(statements, embeddings, clusters)
+            console.print("[green]✓[/green] Statistics calculated            ")
             # Report
             report = AnalysisReport(
                 statements=statements, clusters=clusters,
