@@ -332,6 +332,48 @@ def init_config() -> Path:
     return DEFAULT_CONFIG_FILE
 
 
+def ensure_api_key(config: Config) -> Config:
+    """Ensure API key is set, prompting user if needed.
+
+    If no API key is configured, prompts the user to enter one
+    and saves it to ~/.doc-analyzer/config.yaml for future use.
+
+    Returns:
+        Config with API key set (or raises SystemExit if user cancels)
+    """
+    if config.openrouter.api_key:
+        return config
+
+    # Prompt user for API key
+    print("\n" + "=" * 60)
+    print("OpenRouter API Key Required")
+    print("=" * 60)
+    print("\nNo API key found. Get one at: https://openrouter.ai/keys")
+    print("The key will be saved to ~/.doc-analyzer/config.yaml\n")
+
+    try:
+        api_key = input("Enter your OpenRouter API key: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\nCancelled.")
+        raise SystemExit(1)
+
+    if not api_key:
+        print("\nNo API key provided. Exiting.")
+        raise SystemExit(1)
+
+    # Validate key format (basic check)
+    if not api_key.startswith("sk-"):
+        print("\nWarning: API key doesn't start with 'sk-'. Proceeding anyway...")
+
+    # Save to config
+    config.openrouter.api_key = api_key
+    config.save(DEFAULT_CONFIG_FILE)
+    print(f"\nAPI key saved to {DEFAULT_CONFIG_FILE}")
+    print("You won't need to enter it again.\n")
+
+    return config
+
+
 def show_config(config: Config) -> str:
     """Format config for display."""
     lines = [

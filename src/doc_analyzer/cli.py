@@ -13,7 +13,7 @@ from .analyzer import analyze_pairs, test_claude_cli
 from .anomaly import detect_anomalies
 from .cache import clear_cache, embed_with_cache, embed_with_cache_async, get_cache_stats
 from .clusterer import cluster_statements, get_cluster_keywords
-from .config import Config, init_config, show_config
+from .config import Config, init_config, show_config, ensure_api_key
 from .embedder import embed_statements, embed_statements_async, close_async_client, test_connection
 from .models import AnalysisReport
 from .parser import parse_documents, get_file_stats
@@ -49,6 +49,7 @@ def analyze(
 ):
     """Run full document analysis."""
     config = Config.load(config_file)
+    config = ensure_api_key(config)
     config.analysis.similarity_threshold = threshold
     config.analysis.max_pairs_to_analyze = max_pairs
 
@@ -186,14 +187,45 @@ def contradictions(
 ):
     """Find contradictions only."""
     config = Config.load(config_file)
+    config = ensure_api_key(config)
     docs_path = path or Path(config.documents.path)
     extensions = tuple(config.documents.extensions)
 
-    with console.status("Analyzing..."):
-        statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
-        embeddings = embed_statements(statements, config)
+    # Parse documents first (fast operation)
+    console.print("[dim]Parsing documents...[/dim]")
+    statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
+
+    if not statements:
+        console.print("[red]No statements found in documents[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        console=console,
+        transient=False,
+        refresh_per_second=10,
+    ) as progress:
+        # Generate embeddings
+        task = progress.add_task("Generating embeddings...", total=len(statements))
+        embeddings = embed_statements(statements, config, progress=progress, task_id=task)
+        progress.update(task, completed=len(statements))
+
+        # Find similar pairs
+        task = progress.add_task("Finding similar pairs...", total=None)
         pairs = find_similar_pairs(embeddings, statements, threshold, max_pairs=max_pairs)
-        results = analyze_pairs(pairs, statements, config)
+        progress.update(task, completed=True)
+
+        # Analyze contradictions
+        if pairs:
+            task = progress.add_task("Analyzing contradictions...", total=len(pairs))
+            results = analyze_pairs(pairs, statements, config, progress, task)
+        else:
+            results = []
 
     console.print(f"\n[bold]Found {len(results)} contradictions[/bold]\n")
 
@@ -214,6 +246,7 @@ def anomalies(
 ):
     """Detect anomalies using hybrid ensemble approach."""
     config = Config.load(config_file)
+    config = ensure_api_key(config)
     docs_path = path or Path(config.documents.path)
     extensions = tuple(config.documents.extensions)
 
@@ -221,11 +254,39 @@ def anomalies(
     if method:
         config.anomaly.method = method
 
-    with console.status(f"Detecting anomalies ({config.anomaly.method})..."):
-        statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
-        embeddings = embed_statements(statements, config)
+    # Parse documents first (fast operation)
+    console.print("[dim]Parsing documents...[/dim]")
+    statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
+
+    if not statements:
+        console.print("[red]No statements found in documents[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        console=console,
+        transient=False,
+        refresh_per_second=10,
+    ) as progress:
+        # Generate embeddings
+        task = progress.add_task("Generating embeddings...", total=len(statements))
+        embeddings = embed_statements(statements, config, progress=progress, task_id=task)
+        progress.update(task, completed=len(statements))
+
+        # Cluster
+        task = progress.add_task("Clustering...", total=None)
         clusters = cluster_statements(embeddings)
+        progress.update(task, completed=True)
+
+        # Detect anomalies
+        task = progress.add_task(f"Detecting anomalies ({config.anomaly.method})...", total=None)
         results = detect_anomalies(embeddings, statements, clusters, config.anomaly)
+        progress.update(task, completed=True)
 
     console.print(f"\n[bold]Found {len(results)} anomalies[/bold] (method: {config.anomaly.method})\n")
 
@@ -253,14 +314,43 @@ def stats(
 ):
     """Show statistics only."""
     config = Config.load(config_file)
+    config = ensure_api_key(config)
     docs_path = path or Path(config.documents.path)
     extensions = tuple(config.documents.extensions)
 
-    with console.status("Analyzing..."):
-        statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
-        embeddings = embed_statements(statements, config)
+    # Parse documents first (fast operation)
+    console.print("[dim]Parsing documents...[/dim]")
+    statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
+
+    if not statements:
+        console.print("[red]No statements found in documents[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        console=console,
+        transient=False,
+        refresh_per_second=10,
+    ) as progress:
+        # Generate embeddings
+        task = progress.add_task("Generating embeddings...", total=len(statements))
+        embeddings = embed_statements(statements, config, progress=progress, task_id=task)
+        progress.update(task, completed=len(statements))
+
+        # Cluster
+        task = progress.add_task("Clustering topics...", total=None)
         clusters = cluster_statements(embeddings)
+        progress.update(task, completed=True)
+
+        # Calculate statistics
+        task = progress.add_task("Calculating statistics...", total=None)
         statistics = calculate_stats(statements, embeddings, clusters)
+        progress.update(task, completed=True)
 
     summary = format_stats_summary(statistics)
     console.print(summary)
@@ -274,13 +364,38 @@ def clusters(
 ):
     """Show topic clusters."""
     config = Config.load(config_file)
+    config = ensure_api_key(config)
     docs_path = path or Path(config.documents.path)
     extensions = tuple(config.documents.extensions)
 
-    with console.status("Clustering..."):
-        statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
-        embeddings = embed_statements(statements, config)
+    # Parse documents first (fast operation)
+    console.print("[dim]Parsing documents...[/dim]")
+    statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
+
+    if not statements:
+        console.print("[red]No statements found in documents[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        console=console,
+        transient=False,
+        refresh_per_second=10,
+    ) as progress:
+        # Generate embeddings
+        task = progress.add_task("Generating embeddings...", total=len(statements))
+        embeddings = embed_statements(statements, config, progress=progress, task_id=task)
+        progress.update(task, completed=len(statements))
+
+        # Cluster
+        task = progress.add_task("Clustering topics...", total=None)
         clusters = cluster_statements(embeddings)
+        progress.update(task, completed=True)
 
     console.print(f"\n[bold]Found {clusters.n_clusters} topic clusters[/bold]\n")
 
