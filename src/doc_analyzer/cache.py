@@ -3,30 +3,32 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import numpy as np
+if TYPE_CHECKING:
+    import numpy as np
 
 from .config import DEFAULT_CONFIG_DIR
-from .models import Statement
 
 CACHE_DIR = DEFAULT_CONFIG_DIR / "cache"
 
 
-def get_cache_key(statement: Statement, model: str) -> str:
+def get_cache_key(statement, model: str) -> str:
     """Generate cache key from statement content and model."""
     content = f"{model}:{statement.text}"
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
 def get_cached_embeddings(
-    statements: list[Statement],
+    statements: list,
     model: str,
-) -> tuple[np.ndarray | None, list[int]]:
+) -> tuple:
     """Get cached embeddings for statements.
 
     Returns:
         Tuple of (embeddings array or None, list of indices that were NOT found in cache)
     """
+    import numpy as np
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     embeddings: list[list[float] | None] = [None] * len(statements)
@@ -59,8 +61,8 @@ def get_cached_embeddings(
 
 
 def save_embeddings(
-    statements: list[Statement],
-    embeddings: np.ndarray,
+    statements: list,
+    embeddings,
     model: str,
     indices: list[int] | None = None,
 ) -> int:
@@ -75,6 +77,7 @@ def save_embeddings(
     Returns:
         Number of embeddings saved
     """
+    import numpy as np
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     if indices is None:
@@ -142,12 +145,12 @@ def get_cache_stats() -> dict:
 
 
 def embed_with_cache(
-    statements: list[Statement],
+    statements: list,
     embed_fn,
     model: str,
     progress=None,
     task_id=None,
-) -> np.ndarray:
+):
     """Embed statements with caching.
 
     Args:
@@ -160,6 +163,7 @@ def embed_with_cache(
     Returns:
         Complete embeddings array
     """
+    import numpy as np
     # Check cache
     cached, missing_indices = get_cached_embeddings(statements, model)
 
@@ -191,12 +195,12 @@ def embed_with_cache(
 
 
 async def embed_with_cache_async(
-    statements: list[Statement],
+    statements: list,
     embed_fn,
     model: str,
     progress=None,
     task_id=None,
-) -> np.ndarray:
+):
     """Embed statements with caching (async version).
 
     Args:
@@ -209,6 +213,7 @@ async def embed_with_cache_async(
     Returns:
         Complete embeddings array
     """
+    import numpy as np
     # Check cache (sync - file I/O is fast)
     cached, missing_indices = get_cached_embeddings(statements, model)
 

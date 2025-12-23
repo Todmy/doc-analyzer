@@ -120,7 +120,7 @@ def _format_anomalies_section(anomalies: list[Anomaly]) -> list[str]:
         lines.append(f"### {i}. Anomalous statement")
         lines.append(f"- **File:** {anomaly.statement.source_file.name}:{anomaly.statement.line_number}")
         lines.append(f"  > \"{anomaly.statement.text[:100]}{'...' if len(anomaly.statement.text) > 100 else ''}\"")
-        lines.append(f"- **Distance:** {anomaly.distance:.3f}")
+        lines.append(f"- **Score:** {anomaly.score:.3f}")
         lines.append(f"- **Cluster:** {anomaly.cluster_id}")
         lines.append(f"- **Reason:** {anomaly.reason}")
         lines.append("")
@@ -268,7 +268,7 @@ def _generate_json_report(report: AnalysisReport) -> str:
                 "file": str(a.statement.source_file),
                 "line": a.statement.line_number,
                 "text": a.statement.text,
-                "distance": a.distance,
+                "score": a.score,
                 "cluster_id": a.cluster_id,
                 "reason": a.reason,
             }

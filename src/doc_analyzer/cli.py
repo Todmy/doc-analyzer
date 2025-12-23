@@ -56,6 +56,13 @@ def _import_heavy_modules():
 
     _modules_loaded = True
 
+
+def _import_cache_only():
+    """Import only cache module (no sklearn/numpy needed)."""
+    global clear_cache, get_cache_stats
+    # These functions only use pathlib/json - no heavy deps
+    from .cache import clear_cache, get_cache_stats
+
 app = typer.Typer(
     name="doc-analyzer",
     help="Semantic document analysis: contradictions, anomalies, and statistics",
@@ -93,106 +100,69 @@ def analyze(
     docs_path = path or Path(config.documents.path)
     extensions = tuple(config.documents.extensions)
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        console=console,
-    ) as progress:
-        # Parse documents
-        task = progress.add_task("Parsing documents...", total=None)
-        statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
-        progress.update(task, completed=True)
+    # Parse documents
+    console.print("[dim]Parsing documents...[/dim]", end="\r")
+    statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
 
-        if not statements:
-            console.print("[red]No statements found in documents[/red]")
-            raise typer.Exit(1)
+    if not statements:
+        console.print("[red]No statements found in documents[/red]")
+        raise typer.Exit(1)
 
-        if verbose:
-            console.print(f"Found {len(statements)} statements")
+    console.print(f"[green]✓[/green] Parsed {len(statements)} statements     ")
 
-        # Generate embeddings
-        task = progress.add_task("Generating embeddings...", total=len(statements))
-
-        if use_async:
-            # Async mode: parallel API calls for faster embedding
-            async def run_async_embeddings():
-                async def embed_fn_async(stmts):
-                    return await embed_statements_async(
-                        stmts, config,
-                        max_concurrent=max_concurrent,
-                        progress=progress, task_id=task
-                    )
-
-                result = await embed_with_cache_async(
-                    statements,
-                    embed_fn_async,
-                    config.openrouter.embedding_model,
-                    progress=progress,
-                    task_id=task,
-                )
-                # Clean up async client inside same event loop
-                await close_async_client()
-                return result
-
-            embeddings = asyncio.run(run_async_embeddings())
-        else:
-            # Sync mode: sequential API calls
-            def embed_fn(stmts):
-                return embed_statements(stmts, config, progress=progress, task_id=task)
-
-            embeddings = embed_with_cache(
-                statements,
-                embed_fn,
-                config.openrouter.embedding_model,
-                progress=progress,
-                task_id=task,
+    # Generate embeddings
+    console.print("[dim]Generating embeddings...[/dim]")
+    if use_async:
+        async def run_async_embeddings():
+            async def embed_fn_async(stmts):
+                return await embed_statements_async(stmts, config, max_concurrent=max_concurrent)
+            result = await embed_with_cache_async(
+                statements, embed_fn_async, config.openrouter.embedding_model,
             )
-        progress.update(task, completed=len(statements))
-
-        # Cluster
-        task = progress.add_task("Clustering topics...", total=None)
-        clusters = cluster_statements(embeddings)
-        progress.update(task, completed=True)
-
-        if verbose:
-            console.print(f"Found {clusters.n_clusters} topic clusters")
-
-        # Find similar pairs
-        task = progress.add_task("Finding similar pairs...", total=None)
-        pairs = find_similar_pairs(
-            embeddings,
-            statements,
-            threshold=threshold,
-            skip_same_file=config.analysis.skip_same_file,
-            max_pairs=max_pairs,
+            await close_async_client()
+            return result
+        embeddings = asyncio.run(run_async_embeddings())
+    else:
+        def embed_fn(stmts):
+            return embed_statements(stmts, config)
+        embeddings = embed_with_cache(
+            statements, embed_fn, config.openrouter.embedding_model,
         )
-        progress.update(task, completed=True)
+    console.print(f"[green]✓[/green] Generated embeddings            ")
 
-        if verbose:
-            console.print(f"Found {len(pairs)} similar pairs")
+    # Cluster
+    console.print("[dim]Clustering topics...[/dim]", end="\r")
+    clusters = cluster_statements(embeddings)
+    console.print(f"[green]✓[/green] Found {clusters.n_clusters} clusters           ")
 
-        # Analyze contradictions
-        contradictions = []
-        if not no_contradictions and not dry_run and pairs:
-            task = progress.add_task("Analyzing contradictions...", total=len(pairs))
-            contradictions = analyze_pairs(pairs, statements, config, progress, task)
+    # Find similar pairs
+    console.print("[dim]Finding similar pairs...[/dim]", end="\r")
+    pairs = find_similar_pairs(
+        embeddings, statements,
+        threshold=threshold,
+        skip_same_file=config.analysis.skip_same_file,
+        max_pairs=max_pairs,
+    )
+    console.print(f"[green]✓[/green] Found {len(pairs)} similar pairs       ")
 
-        # Detect anomalies
-        anomalies = []
-        if not no_anomalies and not dry_run:
-            task = progress.add_task("Detecting anomalies...", total=None)
-            anomalies = detect_anomalies(
-                embeddings, statements, clusters,
-                config.anomaly,
-            )
-            progress.update(task, completed=True)
+    # Analyze contradictions
+    contradictions = []
+    if not no_contradictions and not dry_run and pairs:
+        console.print(f"[dim]Analyzing {len(pairs)} pairs with Claude...[/dim]")
+        contradictions = analyze_pairs(pairs, statements, config)
+        console.print(f"[green]✓[/green] Found {len(contradictions)} contradictions")
 
-        # Calculate statistics
-        task = progress.add_task("Calculating statistics...", total=None)
-        statistics = calculate_stats(statements, embeddings, clusters)
-        progress.update(task, completed=True)
+    # Detect anomalies
+    anomalies = []
+    if not no_anomalies and not dry_run:
+        console.print("[dim]Detecting anomalies...[/dim]", end="\r")
+        anomalies = detect_anomalies(embeddings, statements, clusters, config.anomaly)
+        console.print(f"[green]✓[/green] Found {len(anomalies)} anomalies          ")
+
+    # Calculate statistics
+    console.print("[dim]Calculating statistics...[/dim]", end="\r")
+    statistics = calculate_stats(statements, embeddings, clusters)
+    console.print("[green]✓[/green] Statistics calculated            ")
 
     # Generate report
     report = AnalysisReport(
@@ -228,41 +198,32 @@ def contradictions(
     docs_path = path or Path(config.documents.path)
     extensions = tuple(config.documents.extensions)
 
-    # Parse documents first (fast operation)
-    console.print("[dim]Parsing documents...[/dim]")
+    # Parse documents
+    console.print("[dim]Parsing documents...[/dim]", end="\r")
     statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
 
     if not statements:
         console.print("[red]No statements found in documents[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+    console.print(f"[green]✓[/green] Parsed {len(statements)} statements     ")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        console=console,
-        transient=False,
-        refresh_per_second=10,
-    ) as progress:
-        # Generate embeddings
-        task = progress.add_task("Generating embeddings...", total=len(statements))
-        embeddings = embed_statements(statements, config, progress=progress, task_id=task)
-        progress.update(task, completed=len(statements))
+    # Generate embeddings
+    console.print("[dim]Generating embeddings...[/dim]")
+    embeddings = embed_statements(statements, config)
+    console.print(f"[green]✓[/green] Generated embeddings            ")
 
-        # Find similar pairs
-        task = progress.add_task("Finding similar pairs...", total=None)
-        pairs = find_similar_pairs(embeddings, statements, threshold, max_pairs=max_pairs)
-        progress.update(task, completed=True)
+    # Find similar pairs
+    console.print("[dim]Finding similar pairs...[/dim]", end="\r")
+    pairs = find_similar_pairs(embeddings, statements, threshold, max_pairs=max_pairs)
+    console.print(f"[green]✓[/green] Found {len(pairs)} similar pairs       ")
 
-        # Analyze contradictions
-        if pairs:
-            task = progress.add_task("Analyzing contradictions...", total=len(pairs))
-            results = analyze_pairs(pairs, statements, config, progress, task)
-        else:
-            results = []
+    # Analyze contradictions
+    if pairs:
+        console.print(f"[dim]Analyzing {len(pairs)} pairs with Claude...[/dim]")
+        results = analyze_pairs(pairs, statements, config)
+    else:
+        results = []
 
     console.print(f"\n[bold]Found {len(results)} contradictions[/bold]\n")
 
@@ -293,38 +254,29 @@ def anomalies(
         config.anomaly.method = method
 
     # Parse documents first (fast operation)
-    console.print("[dim]Parsing documents...[/dim]")
+    # Parse documents
+    console.print("[dim]Parsing documents...[/dim]", end="\r")
     statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
 
     if not statements:
         console.print("[red]No statements found in documents[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+    console.print(f"[green]✓[/green] Parsed {len(statements)} statements     ")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        console=console,
-        transient=False,
-        refresh_per_second=10,
-    ) as progress:
-        # Generate embeddings
-        task = progress.add_task("Generating embeddings...", total=len(statements))
-        embeddings = embed_statements(statements, config, progress=progress, task_id=task)
-        progress.update(task, completed=len(statements))
+    # Generate embeddings
+    console.print("[dim]Generating embeddings...[/dim]")
+    embeddings = embed_statements(statements, config)
+    console.print(f"[green]✓[/green] Generated embeddings            ")
 
-        # Cluster
-        task = progress.add_task("Clustering...", total=None)
-        clusters = cluster_statements(embeddings)
-        progress.update(task, completed=True)
+    # Cluster
+    console.print("[dim]Clustering...[/dim]", end="\r")
+    clusters = cluster_statements(embeddings)
+    console.print(f"[green]✓[/green] Found {clusters.n_clusters} clusters           ")
 
-        # Detect anomalies
-        task = progress.add_task(f"Detecting anomalies ({config.anomaly.method})...", total=None)
-        results = detect_anomalies(embeddings, statements, clusters, config.anomaly)
-        progress.update(task, completed=True)
+    # Detect anomalies
+    console.print(f"[dim]Detecting anomalies ({config.anomaly.method})...[/dim]", end="\r")
+    results = detect_anomalies(embeddings, statements, clusters, config.anomaly)
 
     console.print(f"\n[bold]Found {len(results)} anomalies[/bold] (method: {config.anomaly.method})\n")
 
@@ -358,38 +310,30 @@ def stats(
     extensions = tuple(config.documents.extensions)
 
     # Parse documents first (fast operation)
-    console.print("[dim]Parsing documents...[/dim]")
+    # Parse documents
+    console.print("[dim]Parsing documents...[/dim]", end="\r")
     statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
 
     if not statements:
         console.print("[red]No statements found in documents[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+    console.print(f"[green]✓[/green] Parsed {len(statements)} statements     ")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        console=console,
-        transient=False,
-        refresh_per_second=10,
-    ) as progress:
-        # Generate embeddings
-        task = progress.add_task("Generating embeddings...", total=len(statements))
-        embeddings = embed_statements(statements, config, progress=progress, task_id=task)
-        progress.update(task, completed=len(statements))
+    # Generate embeddings
+    console.print("[dim]Generating embeddings...[/dim]")
+    embeddings = embed_statements(statements, config)
+    console.print(f"[green]✓[/green] Generated embeddings            ")
 
-        # Cluster
-        task = progress.add_task("Clustering topics...", total=None)
-        clusters = cluster_statements(embeddings)
-        progress.update(task, completed=True)
+    # Cluster
+    console.print("[dim]Clustering topics...[/dim]", end="\r")
+    clusters = cluster_statements(embeddings)
+    console.print(f"[green]✓[/green] Found {clusters.n_clusters} clusters           ")
 
-        # Calculate statistics
-        task = progress.add_task("Calculating statistics...", total=None)
-        statistics = calculate_stats(statements, embeddings, clusters)
-        progress.update(task, completed=True)
+    # Calculate statistics
+    console.print("[dim]Calculating statistics...[/dim]", end="\r")
+    statistics = calculate_stats(statements, embeddings, clusters)
+    console.print("[green]✓[/green] Statistics calculated            ")
 
     summary = format_stats_summary(statistics)
     console.print(summary)
@@ -408,34 +352,24 @@ def clusters(
     docs_path = path or Path(config.documents.path)
     extensions = tuple(config.documents.extensions)
 
-    # Parse documents first (fast operation)
-    console.print("[dim]Parsing documents...[/dim]")
+    # Parse documents
+    console.print("[dim]Parsing documents...[/dim]", end="\r")
     statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
 
     if not statements:
         console.print("[red]No statements found in documents[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+    console.print(f"[green]✓[/green] Parsed {len(statements)} statements     ")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        console=console,
-        transient=False,
-        refresh_per_second=10,
-    ) as progress:
-        # Generate embeddings
-        task = progress.add_task("Generating embeddings...", total=len(statements))
-        embeddings = embed_statements(statements, config, progress=progress, task_id=task)
-        progress.update(task, completed=len(statements))
+    # Generate embeddings
+    console.print("[dim]Generating embeddings...[/dim]")
+    embeddings = embed_statements(statements, config)
+    console.print(f"[green]✓[/green] Generated embeddings            ")
 
-        # Cluster
-        task = progress.add_task("Clustering topics...", total=None)
-        clusters = cluster_statements(embeddings)
-        progress.update(task, completed=True)
+    # Cluster
+    console.print("[dim]Clustering topics...[/dim]", end="\r")
+    clusters = cluster_statements(embeddings)
 
     console.print(f"\n[bold]Found {clusters.n_clusters} topic clusters[/bold]\n")
 
@@ -519,7 +453,7 @@ def config_test(
 @app.command("cache-clear")
 def cache_clear():
     """Clear embedding cache."""
-    _import_heavy_modules()
+    _import_cache_only()
     deleted = clear_cache()
     console.print(f"[green]Cleared {deleted} cached embeddings[/green]")
 
@@ -527,7 +461,7 @@ def cache_clear():
 @app.command("cache-stats")
 def cache_stats():
     """Show cache statistics."""
-    _import_heavy_modules()
+    _import_cache_only()
     stats = get_cache_stats()
     console.print(f"Cache directory: {stats['cache_dir']}")
     console.print(f"Total entries: {stats['total_entries']}")
@@ -538,6 +472,159 @@ def cache_stats():
 def version():
     """Show version."""
     console.print(f"doc-analyzer {__version__}")
+
+
+@app.command("interactive")
+def interactive_mode(
+    path: Path = typer.Argument(..., help="Path to documents"),
+    config_file: Optional[Path] = typer.Option(None, "--config", "-c"),
+):
+    """Interactive mode: load once, run many commands quickly."""
+    _import_heavy_modules()
+    config = Config.load(config_file)
+    config = ensure_api_key(config)
+    docs_path = path
+    extensions = tuple(config.documents.extensions)
+
+    # Initial load
+    console.print(f"\n[bold]Interactive Mode[/bold] - {docs_path}\n")
+
+    console.print("[dim]Parsing documents...[/dim]")
+    statements = parse_documents(docs_path, config.analysis.min_statement_length, extensions)
+
+    if not statements:
+        console.print("[red]No statements found in documents[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Found {len(statements)} statements[/dim]")
+
+    # Generate embeddings with progress
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        console=console,
+        transient=False,
+    ) as progress:
+        task = progress.add_task("Generating embeddings...", total=len(statements))
+
+        async def embed_fn_async(stmts):
+            return await embed_statements_async(stmts, config, progress=progress, task_id=task)
+
+        embeddings = asyncio.run(embed_with_cache_async(
+            statements, embed_fn_async, config.openrouter.embedding_model,
+            progress=progress, task_id=task
+        ))
+        asyncio.run(close_async_client())
+
+    console.print("[dim]Clustering...[/dim]")
+    clusters = cluster_statements(embeddings)
+
+    console.print(f"\n[green]Ready![/green] {len(statements)} statements, {clusters.n_clusters} clusters\n")
+
+    # REPL
+    commands_help = """[bold]Commands:[/bold]
+  [cyan]stats[/cyan]           Show document statistics
+  [cyan]clusters[/cyan]        Show topic clusters
+  [cyan]anomalies[/cyan]       Detect anomalies
+  [cyan]contradictions[/cyan]  Find contradictions (uses Claude CLI)
+  [cyan]analyze[/cyan]         Run full analysis
+  [cyan]help[/cyan]            Show this help
+  [cyan]exit[/cyan]            Exit interactive mode
+"""
+    console.print(commands_help)
+
+    while True:
+        try:
+            cmd = console.input("[bold blue]>[/bold blue] ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[dim]Goodbye![/dim]")
+            break
+
+        if not cmd:
+            continue
+
+        if cmd in ("exit", "quit", "q"):
+            console.print("[dim]Goodbye![/dim]")
+            break
+
+        elif cmd == "help":
+            console.print(commands_help)
+
+        elif cmd == "stats":
+            statistics = calculate_stats(statements, embeddings, clusters)
+            console.print(format_stats_summary(statistics))
+
+        elif cmd == "clusters":
+            console.print(f"\n[bold]Found {clusters.n_clusters} topic clusters[/bold]\n")
+            sizes = clusters.get_cluster_sizes()
+            for cluster_id in sorted(sizes.keys()):
+                if cluster_id == -1:
+                    label = "Noise"
+                else:
+                    keywords = get_cluster_keywords(statements, clusters, cluster_id)
+                    label = ", ".join(keywords) if keywords else f"Cluster {cluster_id}"
+                console.print(f"[cyan]{label}[/cyan] ({sizes[cluster_id]} statements)")
+
+        elif cmd == "anomalies":
+            with console.status("Detecting anomalies..."):
+                results = detect_anomalies(embeddings, statements, clusters, config.anomaly)
+            console.print(f"\n[bold]Found {len(results)} anomalies[/bold]\n")
+            for i, a in enumerate(results[:10], 1):  # Show top 10
+                console.print(f"{i}. {a.statement.source_file.name}:{a.statement.line_number}")
+                console.print(f"   \"{a.statement.text[:60]}...\"")
+                console.print(f"   Score: {a.score:.3f} | {a.reason}\n")
+            if len(results) > 10:
+                console.print(f"[dim]...and {len(results) - 10} more[/dim]")
+
+        elif cmd == "contradictions":
+            with console.status("Finding similar pairs..."):
+                pairs = find_similar_pairs(
+                    embeddings, statements,
+                    threshold=config.analysis.similarity_threshold,
+                    max_pairs=config.analysis.max_pairs_to_analyze
+                )
+            if not pairs:
+                console.print("[yellow]No similar pairs found[/yellow]")
+                continue
+            console.print(f"[dim]Analyzing {len(pairs)} pairs with Claude...[/dim]")
+            with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+                task = progress.add_task(f"Analyzing...", total=len(pairs))
+                results = analyze_pairs(pairs, statements, config, progress, task)
+            console.print(f"\n[bold]Found {len(results)} contradictions[/bold]\n")
+            for i, c in enumerate(results[:10], 1):
+                console.print(f"[yellow]{i}. {c.severity.value.upper()}[/yellow] ({c.confidence:.0%})")
+                console.print(f"   {c.explanation}\n")
+
+        elif cmd == "analyze":
+            console.print("[dim]Running full analysis...[/dim]")
+            # Similar pairs
+            pairs = find_similar_pairs(
+                embeddings, statements,
+                threshold=config.analysis.similarity_threshold,
+                max_pairs=config.analysis.max_pairs_to_analyze
+            )
+            # Contradictions
+            contradictions = []
+            if pairs:
+                with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+                    task = progress.add_task("Analyzing contradictions...", total=len(pairs))
+                    contradictions = analyze_pairs(pairs, statements, config, progress, task)
+            # Anomalies
+            anomalies = detect_anomalies(embeddings, statements, clusters, config.anomaly)
+            # Stats
+            statistics = calculate_stats(statements, embeddings, clusters)
+            # Report
+            report = AnalysisReport(
+                statements=statements, clusters=clusters,
+                contradictions=contradictions, anomalies=anomalies, statistics=statistics
+            )
+            console.print(generate_report(report, "markdown", config.output.group_by))
+
+        else:
+            console.print(f"[red]Unknown command:[/red] {cmd}")
+            console.print("[dim]Type 'help' for available commands[/dim]")
 
 
 def main():
