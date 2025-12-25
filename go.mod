@@ -11,4 +11,8 @@ require (
 	gonum.org/v1/gonum v0.16.0
 )
 
-require github.com/pgvector/pgvector-go v0.3.0
+require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/lib/pq v1.10.9
+	github.com/pgvector/pgvector-go v0.3.0
+)
