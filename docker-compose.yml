@@ -35,8 +35,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - ./web/dist:/app/web/dist:ro
 
 volumes:
   postgres_data:

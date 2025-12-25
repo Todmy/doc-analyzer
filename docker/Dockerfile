@@ -1,5 +1,18 @@
-# Build stage
-FROM golang:1.23-alpine AS builder
+# Frontend build stage
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app/web
+
+# Copy package files
+COPY web/package*.json ./
+RUN npm ci
+
+# Copy frontend source and build
+COPY web/ ./
+RUN npm run build
+
+# Backend build stage
+FROM golang:1.23-alpine AS backend-builder
 
 WORKDIR /app
 
@@ -25,7 +38,10 @@ WORKDIR /app
 RUN apk --no-cache add ca-certificates
 
 # Copy binary from builder
-COPY --from=builder /app/server /app/server
+COPY --from=backend-builder /app/server /app/server
+
+# Copy frontend build from frontend-builder
+COPY --from=frontend-builder /app/web/dist /app/web/dist
 
 # Create non-root user
 RUN adduser -D -g '' appuser
