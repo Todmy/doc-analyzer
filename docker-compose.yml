@@ -27,13 +27,13 @@ services:
     env_file:
       - .env
     environment:
-      PORT: "8080"
+      PORT: "4444"
       DATABASE_URL: postgres://docanalyzer:docanalyzer@db:5432/docanalyzer?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-development-secret-change-in-prod}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     ports:
-      - "8080:8080"
+      - "4444:4444"
     depends_on:
       db:
         condition: service_healthy
