@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -19,7 +20,7 @@ func (s *Server) convertToModelStatements(statements []*storage.Statement) []mod
 	result := make([]models.Statement, len(statements))
 	for i, stmt := range statements {
 		// Get document filename for source file
-		doc, _ := s.documentRepo.GetByID(nil, stmt.DocumentID)
+		doc, _ := s.documentRepo.GetByID(context.Background(), stmt.DocumentID)
 		filename := ""
 		if doc != nil {
 			filename = doc.Filename

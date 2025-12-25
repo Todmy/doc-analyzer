@@ -43,12 +43,13 @@ CREATE TABLE documents (
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     filename VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
-    hash VARCHAR(64) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    content_hash VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX idx_documents_project_id ON documents(project_id);
-CREATE INDEX idx_documents_hash ON documents(hash);
+CREATE INDEX idx_documents_content_hash ON documents(content_hash);
 
 -- Statements table with embedding vector
 CREATE TABLE statements (

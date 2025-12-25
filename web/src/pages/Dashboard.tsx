@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Visualization from '../components/Visualization'
 import ClusterPanel from '../components/ClusterPanel'
 import SemanticAxes from '../components/SemanticAxes'
@@ -13,6 +13,43 @@ export default function Dashboard() {
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
   const [method, setMethod] = useState<'pca' | 'semantic'>('pca')
   const [semanticWords, setSemanticWords] = useState<string[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const queryClient = useQueryClient()
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    setUploading(true)
+    try {
+      for (const file of Array.from(files)) {
+        const formData = new FormData()
+        formData.append('file', file)
+
+        const response = await fetch(`/api/v1/projects/${projectId}/documents`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+          body: formData,
+        })
+
+        if (!response.ok) {
+          const error = await response.json()
+          alert(`Failed to upload ${file.name}: ${error.error || 'Unknown error'}`)
+        }
+      }
+      // Refresh data after upload
+      queryClient.invalidateQueries({ queryKey: ['visualization', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['clusters', projectId] })
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
 
   const { data: visualization, isLoading } = useQuery({
     queryKey: ['visualization', projectId, method, semanticWords],
@@ -62,6 +99,21 @@ export default function Dashboard() {
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-bold">Project Analysis</h1>
           <div className="flex gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".md,.txt,.json,.csv"
+              onChange={handleUpload}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 px-3 py-1 rounded text-sm"
+            >
+              {uploading ? 'Uploading...' : 'Upload Files'}
+            </button>
             <button className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
               Export
             </button>

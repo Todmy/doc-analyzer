@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/csv"
+	"encoding/json"
 	"regexp"
 	"strings"
 
@@ -16,8 +18,96 @@ const (
 	maxStatementLength = 1000
 )
 
-// extractStatements extracts statements from document content
-func extractStatements(content string, documentID uuid.UUID) []*storage.Statement {
+// extractStatements extracts statements from document content based on file extension
+func extractStatements(content string, documentID uuid.UUID, ext string) []*storage.Statement {
+	switch ext {
+	case ".json":
+		return extractStatementsFromJSON(content, documentID)
+	case ".csv":
+		return extractStatementsFromCSV(content, documentID)
+	default:
+		return extractStatementsFromText(content, documentID)
+	}
+}
+
+// extractStatementsFromJSON extracts statements from JSON content
+func extractStatementsFromJSON(content string, documentID uuid.UUID) []*storage.Statement {
+	var statements []*storage.Statement
+	var data interface{}
+
+	if err := json.Unmarshal([]byte(content), &data); err != nil {
+		return statements
+	}
+
+	position := 0
+	extractJSONStrings(data, documentID, &statements, &position)
+	return statements
+}
+
+func extractJSONStrings(data interface{}, documentID uuid.UUID, statements *[]*storage.Statement, position *int) {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for _, value := range v {
+			extractJSONStrings(value, documentID, statements, position)
+		}
+	case []interface{}:
+		for _, item := range v {
+			extractJSONStrings(item, documentID, statements, position)
+		}
+	case string:
+		text := strings.TrimSpace(v)
+		if len(text) >= minStatementLength {
+			if len(text) > maxStatementLength {
+				text = text[:maxStatementLength] + "..."
+			}
+			*statements = append(*statements, &storage.Statement{
+				DocumentID: documentID,
+				Text:       text,
+				Position:   *position,
+				Line:       *position + 1,
+				Embedding:  pgvector.NewVector(nil),
+			})
+			*position++
+		}
+	}
+}
+
+// extractStatementsFromCSV extracts statements from CSV content
+func extractStatementsFromCSV(content string, documentID uuid.UUID) []*storage.Statement {
+	var statements []*storage.Statement
+	reader := csv.NewReader(strings.NewReader(content))
+
+	records, err := reader.ReadAll()
+	if err != nil {
+		return statements
+	}
+
+	position := 0
+	for lineNum, record := range records {
+		// Combine all fields in the row
+		rowText := strings.Join(record, " ")
+		rowText = strings.TrimSpace(rowText)
+
+		if len(rowText) >= minStatementLength {
+			if len(rowText) > maxStatementLength {
+				rowText = rowText[:maxStatementLength] + "..."
+			}
+			statements = append(statements, &storage.Statement{
+				DocumentID: documentID,
+				Text:       rowText,
+				Position:   position,
+				Line:       lineNum + 1,
+				Embedding:  pgvector.NewVector(nil),
+			})
+			position++
+		}
+	}
+
+	return statements
+}
+
+// extractStatementsFromText extracts statements from markdown/text content
+func extractStatementsFromText(content string, documentID uuid.UUID) []*storage.Statement {
 	var statements []*storage.Statement
 
 	// Split by paragraph (double newline) or single newline for lists

@@ -74,8 +74,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Validate file extension
 	ext := filepath.Ext(header.Filename)
-	if ext != ".md" && ext != ".txt" {
-		respondError(w, http.StatusBadRequest, "only .md and .txt files are allowed")
+	allowedExts := map[string]bool{".md": true, ".txt": true, ".json": true, ".csv": true}
+	if !allowedExts[ext] {
+		respondError(w, http.StatusBadRequest, "only .md, .txt, .json, and .csv files are allowed")
 		return
 	}
 
@@ -121,7 +122,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract statements from document
-	statements := extractStatements(doc.Content, doc.ID)
+	statements := extractStatements(doc.Content, doc.ID, ext)
 
 	if len(statements) > 0 {
 		// Generate embeddings for statements
