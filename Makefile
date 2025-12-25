@@ -21,6 +21,7 @@ help:
 	@echo "  make docker-build - Build Docker images"
 	@echo ""
 	@echo "Docker:"
+	@echo "  make docker-run   - Build and start all services (frontend + backend + db)"
 	@echo "  make docker-up    - Start all services with Docker"
 	@echo "  make docker-down  - Stop all Docker services"
 	@echo ""
@@ -92,6 +93,9 @@ docker-build:
 
 docker-up:
 	docker compose up -d
+
+docker-run:
+	docker compose up -d --build
 
 docker-down:
 	docker compose down
