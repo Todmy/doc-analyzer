@@ -3,7 +3,12 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -93,8 +98,8 @@ func (s *Server) setupRoutes() {
 		})
 	})
 
-	// Serve static files for frontend
-	s.router.Handle("/*", http.FileServer(http.Dir("web/dist")))
+	// Serve static files for frontend (SPA)
+	s.router.Get("/*", s.serveSPA)
 }
 
 func (s *Server) Run(addr string) error {
@@ -110,4 +115,45 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func respondError(w http.ResponseWriter, status int, message string) {
 	respondJSON(w, status, map[string]string{"error": message})
+}
+
+const staticDir = "web/dist"
+
+// serveSPA serves the SPA - static files if they exist, otherwise index.html
+func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
+	// Get the requested path
+	path := r.URL.Path
+
+	// Clean the path
+	path = filepath.Clean(path)
+	if path == "/" {
+		path = "/index.html"
+	}
+
+	// Build the full file path
+	fullPath := filepath.Join(staticDir, path)
+
+	// Check if file exists
+	info, err := os.Stat(fullPath)
+	if err == nil && !info.IsDir() {
+		// File exists, serve it
+		http.ServeFile(w, r, fullPath)
+		return
+	}
+
+	// For directories or non-existent files, check if it's an asset request
+	if strings.HasPrefix(path, "/assets/") {
+		// Asset not found
+		http.NotFound(w, r)
+		return
+	}
+
+	// For SPA routes, serve index.html
+	indexPath := filepath.Join(staticDir, "index.html")
+	if _, err := os.Stat(indexPath); errors.Is(err, fs.ErrNotExist) {
+		http.Error(w, "Frontend not built. Run 'make frontend-build' first.", http.StatusNotFound)
+		return
+	}
+
+	http.ServeFile(w, r, indexPath)
 }
