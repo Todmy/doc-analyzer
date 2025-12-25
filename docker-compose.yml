@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: doc-analyzer-db
+    environment:
+      POSTGRES_USER: docanalyzer
+      POSTGRES_PASSWORD: docanalyzer
+      POSTGRES_DB: docanalyzer
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docanalyzer"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: doc-analyzer-server
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://docanalyzer:docanalyzer@db:5432/docanalyzer?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-development-secret-change-in-prod}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./web/dist:/app/web/dist:ro
+
+volumes:
+  postgres_data:
