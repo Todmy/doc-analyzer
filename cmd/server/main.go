@@ -1,10 +1,12 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
 
+	_ "github.com/lib/pq"
 	"github.com/todmy/doc-analyzer/internal/api"
 )
 
@@ -14,7 +16,24 @@ func main() {
 		port = "8080"
 	}
 
-	server := api.NewServer()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://postgres:postgres@localhost:5432/doc_analyzer?sslmode=disable"
+	}
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		log.Fatalf("Failed to ping database: %v", err)
+	}
+
+	server := api.NewServer(api.ServerConfig{
+		DB: db,
+	})
 
 	fmt.Printf("Starting doc-analyzer server on port %s\n", port)
 	if err := server.Run(":" + port); err != nil {
