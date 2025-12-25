@@ -14,8 +14,14 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"github.com/todmy/doc-analyzer/internal/anomaly"
 	"github.com/todmy/doc-analyzer/internal/auth"
+	"github.com/todmy/doc-analyzer/internal/clustering"
+	"github.com/todmy/doc-analyzer/internal/contradiction"
+	"github.com/todmy/doc-analyzer/internal/embeddings"
+	"github.com/todmy/doc-analyzer/internal/similarity"
 	"github.com/todmy/doc-analyzer/internal/storage"
+	"github.com/todmy/doc-analyzer/internal/visualization"
 )
 
 type Server struct {
@@ -25,11 +31,21 @@ type Server struct {
 	projectRepo   storage.ProjectRepository
 	documentRepo  storage.DocumentRepository
 	statementRepo storage.StatementRepository
+
+	// Analysis services
+	embeddingClient      *embeddings.Client
+	clusteringService    *clustering.Service
+	similarityService    *similarity.Service
+	anomalyService       *anomaly.Service
+	contradictionService *contradiction.Service
+	visualizationService *visualization.Service
 }
 
 type ServerConfig struct {
-	DB        *sql.DB
-	JWTSecret string
+	DB              *sql.DB
+	JWTSecret       string
+	OpenRouterKey   string
+	AnthropicAPIKey string
 }
 
 func NewServer(config ServerConfig) *Server {
@@ -58,6 +74,29 @@ func NewServer(config ServerConfig) *Server {
 		SecretKey: jwtSecret,
 	}, userRepo)
 
+	// Initialize embedding client (optional - can work without it)
+	var embClient *embeddings.Client
+	if config.OpenRouterKey != "" {
+		embClient = embeddings.NewClient(config.OpenRouterKey)
+	}
+
+	// Initialize analysis services
+	clusteringSvc := clustering.NewService(clustering.DefaultConfig())
+	similaritySvc := similarity.NewService(0.75)
+	anomalySvc := anomaly.NewService(anomaly.DefaultConfig())
+
+	// Initialize contradiction service (optional - needs API key)
+	var contradictionSvc *contradiction.Service
+	if config.AnthropicAPIKey != "" {
+		analyzer := contradiction.NewAnalyzer(contradiction.Config{
+			APIKey: config.AnthropicAPIKey,
+		})
+		contradictionSvc = contradiction.NewService(analyzer, contradiction.DefaultServiceConfig())
+	}
+
+	// Initialize visualization service
+	visualizationSvc := visualization.NewService(visualization.DefaultConfig(), embClient)
+
 	s := &Server{
 		router:        r,
 		db:            config.DB,
@@ -65,6 +104,13 @@ func NewServer(config ServerConfig) *Server {
 		projectRepo:   storage.NewPostgresProjectRepository(config.DB),
 		documentRepo:  storage.NewPostgresDocumentRepository(config.DB),
 		statementRepo: storage.NewPostgresStatementRepository(config.DB),
+
+		embeddingClient:      embClient,
+		clusteringService:    clusteringSvc,
+		similarityService:    similaritySvc,
+		anomalyService:       anomalySvc,
+		contradictionService: contradictionSvc,
+		visualizationService: visualizationSvc,
 	}
 	s.setupRoutes()
 
@@ -83,8 +129,7 @@ func (s *Server) setupRoutes() {
 
 		// Protected routes
 		r.Group(func(r chi.Router) {
-			// TODO: Add auth middleware
-			// r.Use(s.authMiddleware)
+			r.Use(auth.Middleware(s.authService))
 
 			// Projects
 			r.Route("/projects", func(r chi.Router) {

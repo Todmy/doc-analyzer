@@ -32,10 +32,14 @@ func main() {
 	}
 
 	jwtSecret := os.Getenv("JWT_SECRET")
+	openRouterKey := os.Getenv("OPENROUTER_API_KEY")
+	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 
 	server := api.NewServer(api.ServerConfig{
-		DB:        db,
-		JWTSecret: jwtSecret,
+		DB:              db,
+		JWTSecret:       jwtSecret,
+		OpenRouterKey:   openRouterKey,
+		AnthropicAPIKey: anthropicKey,
 	})
 
 	fmt.Printf("Starting doc-analyzer server on port %s\n", port)

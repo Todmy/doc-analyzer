@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/todmy/doc-analyzer/internal/auth"
 	"github.com/todmy/doc-analyzer/internal/storage"
 )
 
@@ -49,8 +50,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := getUserIDFromContext(r.Context())
-	if project.UserID.String() != userID {
+	claims, ok := auth.GetUserFromContext(r.Context())
+	if !ok || project.UserID.String() != claims.UserID {
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -119,7 +120,22 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Trigger statement extraction and embedding generation
+	// Extract statements from document
+	statements := extractStatements(doc.Content, doc.ID)
+
+	if len(statements) > 0 {
+		// Generate embeddings for statements
+		if err := s.generateEmbeddingsForStatements(r.Context(), statements); err != nil {
+			// Log error but don't fail the upload
+			// Statements will be stored without embeddings
+		}
+
+		// Save statements
+		if err := s.statementRepo.CreateBatch(r.Context(), statements); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to save statements")
+			return
+		}
+	}
 
 	respondJSON(w, http.StatusCreated, UploadResponse{
 		DocumentID: doc.ID.String(),

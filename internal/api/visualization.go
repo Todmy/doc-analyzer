@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // VisualizationResponse represents the visualization data
@@ -49,6 +50,12 @@ func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	pid, err := uuid.Parse(projectID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+
 	// Parse dimensions parameter (default 2)
 	dimensions := 2
 	if d := r.URL.Query().Get("dimensions"); d == "3" {
@@ -61,11 +68,97 @@ func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Reque
 		method = "pca"
 	}
 
-	// TODO: Fetch actual visualization data from database
-	// For now, return stub response
+	// Get statements for project
+	statements, err := s.statementRepo.GetByProjectID(r.Context(), pid)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to fetch statements")
+		return
+	}
+
+	if len(statements) == 0 {
+		respondJSON(w, http.StatusOK, VisualizationResponse{
+			Points:     []VisualizationPoint{},
+			Clusters:   []ClusterInfo{},
+			Dimensions: dimensions,
+			Method:     method,
+		})
+		return
+	}
+
+	// Extract embeddings
+	embeddings := make([][]float32, len(statements))
+	for i, stmt := range statements {
+		embeddings[i] = stmt.Embedding.Slice()
+	}
+
+	// Get visualization coordinates
+	visResult, err := s.visualizationService.GetVisualization(r.Context(), embeddings, method, dimensions, nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to generate visualization")
+		return
+	}
+
+	// Convert to model statements for clustering and anomaly detection
+	modelStatements := s.convertToModelStatements(statements)
+
+	// Run clustering to get cluster assignments
+	clusterResult := s.clusteringService.AutoCluster(modelStatements, 10)
+
+	// Get anomaly scores
+	anomalyResults := s.anomalyService.DetectAnomalies(modelStatements)
+	anomalyScores := make(map[int]float64)
+	for _, a := range anomalyResults {
+		anomalyScores[a.Index] = a.Score
+	}
+
+	// Build visualization points
+	points := make([]VisualizationPoint, len(statements))
+	for i, stmt := range statements {
+		// Get document filename
+		doc, _ := s.documentRepo.GetByID(r.Context(), stmt.DocumentID)
+		filename := ""
+		if doc != nil {
+			filename = doc.Filename
+		}
+
+		// Truncate text for preview
+		preview := stmt.Text
+		if len(preview) > 100 {
+			preview = preview[:100] + "..."
+		}
+
+		points[i] = VisualizationPoint{
+			ID:           stmt.ID.String(),
+			X:            visResult.Points[i].X,
+			Y:            visResult.Points[i].Y,
+			Z:            visResult.Points[i].Z,
+			ClusterID:    clusterResult.Labels[i],
+			AnomalyScore: anomalyScores[i],
+			Preview:      preview,
+			SourceFile:   filename,
+		}
+	}
+
+	// Build cluster info
+	clusterColors := []string{"#3498db", "#e74c3c", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c", "#e91e63", "#00bcd4", "#ff5722", "#607d8b"}
+	clusters := make([]ClusterInfo, len(clusterResult.Clusters))
+	for i, c := range clusterResult.Clusters {
+		keywords := make([]string, len(c.Keywords))
+		for j, kw := range c.Keywords {
+			keywords[j] = kw.Word
+		}
+		color := clusterColors[i%len(clusterColors)]
+		clusters[i] = ClusterInfo{
+			ID:       c.ID,
+			Keywords: keywords,
+			Color:    color,
+			Size:     c.Size,
+		}
+	}
+
 	respondJSON(w, http.StatusOK, VisualizationResponse{
-		Points:     []VisualizationPoint{},
-		Clusters:   []ClusterInfo{},
+		Points:     points,
+		Clusters:   clusters,
 		Dimensions: dimensions,
 		Method:     method,
 	})
@@ -76,6 +169,12 @@ func (s *Server) handleSetAxesImpl(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	if projectID == "" {
 		respondError(w, http.StatusBadRequest, "project id is required")
+		return
+	}
+
+	pid, err := uuid.Parse(projectID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid project id")
 		return
 	}
 
@@ -90,15 +189,102 @@ func (s *Server) handleSetAxesImpl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Implement semantic axis projection
-	// 1. Embed the words
-	// 2. Find dimensions with max values for each word
-	// 3. Project statements onto these dimensions
-	// 4. Return reprojected coordinates
+	// Check if embedding client is configured for semantic axes
+	if s.embeddingClient == nil {
+		respondError(w, http.StatusServiceUnavailable, "embedding service not configured - set OPENROUTER_API_KEY")
+		return
+	}
+
+	// Get statements for project
+	statements, err := s.statementRepo.GetByProjectID(r.Context(), pid)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to fetch statements")
+		return
+	}
+
+	if len(statements) == 0 {
+		respondJSON(w, http.StatusOK, VisualizationResponse{
+			Points:     []VisualizationPoint{},
+			Clusters:   []ClusterInfo{},
+			Dimensions: len(req.Words),
+			Method:     "semantic",
+			AxisLabels: req.Words,
+		})
+		return
+	}
+
+	// Extract embeddings
+	embeddings := make([][]float32, len(statements))
+	for i, stmt := range statements {
+		embeddings[i] = stmt.Embedding.Slice()
+	}
+
+	// Get visualization coordinates using semantic axes
+	visResult, err := s.visualizationService.GetVisualization(r.Context(), embeddings, "semantic", len(req.Words), req.Words)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to generate semantic visualization: "+err.Error())
+		return
+	}
+
+	// Convert to model statements for clustering
+	modelStatements := s.convertToModelStatements(statements)
+
+	// Run clustering
+	clusterResult := s.clusteringService.AutoCluster(modelStatements, 10)
+
+	// Get anomaly scores
+	anomalyResults := s.anomalyService.DetectAnomalies(modelStatements)
+	anomalyScores := make(map[int]float64)
+	for _, a := range anomalyResults {
+		anomalyScores[a.Index] = a.Score
+	}
+
+	// Build visualization points
+	points := make([]VisualizationPoint, len(statements))
+	for i, stmt := range statements {
+		doc, _ := s.documentRepo.GetByID(r.Context(), stmt.DocumentID)
+		filename := ""
+		if doc != nil {
+			filename = doc.Filename
+		}
+
+		preview := stmt.Text
+		if len(preview) > 100 {
+			preview = preview[:100] + "..."
+		}
+
+		points[i] = VisualizationPoint{
+			ID:           stmt.ID.String(),
+			X:            visResult.Points[i].X,
+			Y:            visResult.Points[i].Y,
+			Z:            visResult.Points[i].Z,
+			ClusterID:    clusterResult.Labels[i],
+			AnomalyScore: anomalyScores[i],
+			Preview:      preview,
+			SourceFile:   filename,
+		}
+	}
+
+	// Build cluster info
+	clusterColors := []string{"#3498db", "#e74c3c", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c", "#e91e63", "#00bcd4", "#ff5722", "#607d8b"}
+	clusters := make([]ClusterInfo, len(clusterResult.Clusters))
+	for i, c := range clusterResult.Clusters {
+		keywords := make([]string, len(c.Keywords))
+		for j, kw := range c.Keywords {
+			keywords[j] = kw.Word
+		}
+		color := clusterColors[i%len(clusterColors)]
+		clusters[i] = ClusterInfo{
+			ID:       c.ID,
+			Keywords: keywords,
+			Color:    color,
+			Size:     c.Size,
+		}
+	}
 
 	respondJSON(w, http.StatusOK, VisualizationResponse{
-		Points:     []VisualizationPoint{},
-		Clusters:   []ClusterInfo{},
+		Points:     points,
+		Clusters:   clusters,
 		Dimensions: len(req.Words),
 		Method:     "semantic",
 		AxisLabels: req.Words,

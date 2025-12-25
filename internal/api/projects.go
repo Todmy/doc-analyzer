@@ -1,13 +1,13 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/todmy/doc-analyzer/internal/auth"
 	"github.com/todmy/doc-analyzer/internal/storage"
 )
 
@@ -26,13 +26,13 @@ type ProjectResponse struct {
 
 // handleListProjects returns all projects for the authenticated user
 func (s *Server) handleListProjectsImpl(w http.ResponseWriter, r *http.Request) {
-	userID := getUserIDFromContext(r.Context())
-	if userID == "" {
+	claims, ok := auth.GetUserFromContext(r.Context())
+	if !ok {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
-	uid, err := uuid.Parse(userID)
+	uid, err := uuid.Parse(claims.UserID)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "invalid user id")
 		return
@@ -59,13 +59,13 @@ func (s *Server) handleListProjectsImpl(w http.ResponseWriter, r *http.Request) 
 
 // handleCreateProject creates a new project
 func (s *Server) handleCreateProjectImpl(w http.ResponseWriter, r *http.Request) {
-	userID := getUserIDFromContext(r.Context())
-	if userID == "" {
+	claims, ok := auth.GetUserFromContext(r.Context())
+	if !ok {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
-	uid, err := uuid.Parse(userID)
+	uid, err := uuid.Parse(claims.UserID)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "invalid user id")
 		return
@@ -126,8 +126,8 @@ func (s *Server) handleGetProjectImpl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify ownership
-	userID := getUserIDFromContext(r.Context())
-	if project.UserID.String() != userID {
+	claims, ok := auth.GetUserFromContext(r.Context())
+	if !ok || project.UserID.String() != claims.UserID {
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -166,8 +166,8 @@ func (s *Server) handleDeleteProjectImpl(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	userID := getUserIDFromContext(r.Context())
-	if project.UserID.String() != userID {
+	claims, ok := auth.GetUserFromContext(r.Context())
+	if !ok || project.UserID.String() != claims.UserID {
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -178,13 +178,4 @@ func (s *Server) handleDeleteProjectImpl(w http.ResponseWriter, r *http.Request)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-// getUserIDFromContext extracts user ID from request context
-func getUserIDFromContext(ctx context.Context) string {
-	// This would be set by auth middleware
-	if userID, ok := ctx.Value("user_id").(string); ok {
-		return userID
-	}
-	return ""
 }
