@@ -70,9 +70,9 @@ func NewServer(config ServerConfig) *Server {
 	if jwtSecret == "" {
 		jwtSecret = "development-secret-change-in-prod"
 	}
-	authService := auth.NewJWTService(auth.Config{
-		SecretKey: jwtSecret,
-	}, userRepo)
+	authConfig := auth.DefaultConfig()
+	authConfig.SecretKey = jwtSecret
+	authService := auth.NewJWTService(authConfig, userRepo)
 
 	// Initialize embedding client (optional - can work without it)
 	var embClient *embeddings.Client
