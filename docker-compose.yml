@@ -24,6 +24,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     container_name: doc-analyzer-server
+    env_file:
+      - .env
     environment:
       PORT: "8080"
       DATABASE_URL: postgres://docanalyzer:docanalyzer@db:5432/docanalyzer?sslmode=disable
