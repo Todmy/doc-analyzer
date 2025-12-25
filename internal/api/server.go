@@ -1,19 +1,30 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+
+	"github.com/todmy/doc-analyzer/internal/storage"
 )
 
 type Server struct {
-	router *chi.Mux
+	router        *chi.Mux
+	db            *sql.DB
+	projectRepo   storage.ProjectRepository
+	documentRepo  storage.DocumentRepository
+	statementRepo storage.StatementRepository
 }
 
-func NewServer() *Server {
+type ServerConfig struct {
+	DB *sql.DB
+}
+
+func NewServer(config ServerConfig) *Server {
 	r := chi.NewRouter()
 
 	// Middleware
@@ -29,7 +40,13 @@ func NewServer() *Server {
 		MaxAge:           300,
 	}))
 
-	s := &Server{router: r}
+	s := &Server{
+		router:        r,
+		db:            config.DB,
+		projectRepo:   storage.NewPostgresProjectRepository(config.DB),
+		documentRepo:  storage.NewPostgresDocumentRepository(config.DB),
+		statementRepo: storage.NewPostgresStatementRepository(config.DB),
+	}
 	s.setupRoutes()
 
 	return s
@@ -52,21 +69,26 @@ func (s *Server) setupRoutes() {
 
 			// Projects
 			r.Route("/projects", func(r chi.Router) {
-				r.Get("/", s.handleListProjects)
-				r.Post("/", s.handleCreateProject)
-				r.Get("/{projectID}", s.handleGetProject)
-				r.Delete("/{projectID}", s.handleDeleteProject)
+				r.Get("/", s.handleListProjectsImpl)
+				r.Post("/", s.handleCreateProjectImpl)
+				r.Get("/{projectID}", s.handleGetProjectImpl)
+				r.Delete("/{projectID}", s.handleDeleteProjectImpl)
+
+				// Documents
+				r.Post("/{projectID}/documents", s.handleUpload)
+				r.Get("/{projectID}/documents", s.handleListDocuments)
+				r.Delete("/{projectID}/documents/{documentID}", s.handleDeleteDocument)
 
 				// Analysis
-				r.Post("/{projectID}/analyze", s.handleAnalyze)
-				r.Get("/{projectID}/visualization", s.handleGetVisualization)
-				r.Post("/{projectID}/visualization/axes", s.handleSetAxes)
+				r.Post("/{projectID}/analyze", s.handleAnalyzeImpl)
+				r.Get("/{projectID}/visualization", s.handleGetVisualizationImpl)
+				r.Post("/{projectID}/visualization/axes", s.handleSetAxesImpl)
 
 				// Results
-				r.Get("/{projectID}/clusters", s.handleGetClusters)
-				r.Get("/{projectID}/similar-pairs", s.handleGetSimilarPairs)
-				r.Get("/{projectID}/anomalies", s.handleGetAnomalies)
-				r.Get("/{projectID}/contradictions", s.handleGetContradictions)
+				r.Get("/{projectID}/clusters", s.handleGetClustersImpl)
+				r.Get("/{projectID}/similar-pairs", s.handleGetSimilarPairsImpl)
+				r.Get("/{projectID}/anomalies", s.handleGetAnomaliesImpl)
+				r.Get("/{projectID}/contradictions", s.handleGetContradictionsImpl)
 			})
 		})
 	})
