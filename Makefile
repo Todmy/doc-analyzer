@@ -1,102 +1,119 @@
-.PHONY: install dev test lint clean analyze help build build-clean
-
-# Load .env file (ignore if doesn't exist for build-only scenarios)
--include .env
-export
-
-# Config file path
-CONFIG = --config ./config.yaml
+.PHONY: help build run dev test lint clean db-up db-down db-reset frontend-dev frontend-build docker-build docker-up docker-down
 
 # Default target
 help:
-	@echo "doc-analyzer - Semantic document analysis CLI"
-	@echo ""
-	@echo "Setup:"
-	@echo "  make install     Install package"
-	@echo "  make dev         Install with dev dependencies"
+	@echo "doc-analyzer - Available commands:"
 	@echo ""
 	@echo "Development:"
-	@echo "  make test        Run tests"
-	@echo "  make lint        Run linter"
-	@echo "  make clean       Remove build artifacts"
+	@echo "  make dev          - Run server in development mode"
+	@echo "  make frontend-dev - Run frontend dev server"
+	@echo "  make test         - Run all tests"
+	@echo "  make lint         - Run linter"
+	@echo ""
+	@echo "Database:"
+	@echo "  make db-up        - Start PostgreSQL container"
+	@echo "  make db-down      - Stop PostgreSQL container"
+	@echo "  make db-reset     - Reset database (drop and recreate)"
 	@echo ""
 	@echo "Build:"
-	@echo "  make build       Build portable executable (current platform)"
-	@echo "  make build-clean Clean build artifacts"
+	@echo "  make build        - Build Go binary"
+	@echo "  make frontend-build - Build frontend for production"
+	@echo "  make docker-build - Build Docker images"
 	@echo ""
-	@echo "Usage:"
-	@echo "  make analyze     Run full analysis on ../../docs"
-	@echo "  make stats       Show statistics only"
-	@echo "  make clusters    Show topic clusters"
-	@echo "  make anomalies   Detect anomalies"
-	@echo "  make config      Show current config"
+	@echo "Docker:"
+	@echo "  make docker-up    - Start all services with Docker"
+	@echo "  make docker-down  - Stop all Docker services"
+	@echo ""
+	@echo "Legacy (Python - in src-old/):"
+	@echo "  make legacy-install - Install old Python package"
+	@echo "  make legacy-analyze - Run old Python analyzer"
+	@echo ""
+	@echo "Cleanup:"
+	@echo "  make clean        - Remove build artifacts"
 
-# Setup
-install:
-	pip install -e .
+# Build
+build:
+	go build -o bin/server ./cmd/server
+
+run: build
+	./bin/server
 
 dev:
-	pip install -e ".[dev]"
+	go run ./cmd/server
 
-# Development
+# Testing
 test:
-	pytest tests/ -v
+	go test -v ./...
 
+test-coverage:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+
+# Linting
 lint:
-	python -m py_compile src/doc_analyzer/*.py
+	golangci-lint run
 
+lint-fix:
+	golangci-lint run --fix
+
+# Database
+db-up:
+	docker compose up -d db
+
+db-down:
+	docker compose down
+
+db-reset:
+	docker compose down -v
+	docker compose up -d db
+	@echo "Waiting for database to be ready..."
+	@sleep 3
+	@echo "Database reset complete"
+
+db-logs:
+	docker compose logs -f db
+
+db-shell:
+	docker compose exec db psql -U docanalyzer -d docanalyzer
+
+# Frontend
+frontend-dev:
+	cd web && npm run dev
+
+frontend-build:
+	cd web && npm run build
+
+frontend-install:
+	cd web && npm install
+
+# Docker
+docker-build:
+	docker compose build
+
+docker-up:
+	docker compose up -d
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f
+
+# Cleanup
 clean:
-	rm -rf build/ dist/ *.egg-info src/*.egg-info
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
+	rm -rf bin/
+	rm -rf web/dist/
+	rm -f coverage.out coverage.html
 
-# Analysis commands (default: analyze ../../docs)
-DOCS_PATH ?= ../../docs
+# Legacy Python support (from src-old/)
+legacy-install:
+	cd src-old && pip install -e .
 
-analyze:
-	doc-analyzer analyze $(DOCS_PATH) $(CONFIG) --verbose
+legacy-analyze:
+	cd src-old && doc-analyzer analyze $(DOCS_PATH) --verbose
 
-stats:
-	doc-analyzer stats $(DOCS_PATH) $(CONFIG)
-
-clusters:
-	doc-analyzer clusters $(DOCS_PATH) $(CONFIG) --samples
-
-anomalies:
-	doc-analyzer anomalies $(DOCS_PATH) $(CONFIG)
-
-contradictions:
-	doc-analyzer contradictions $(DOCS_PATH) $(CONFIG)
-
-# Config
-config:
-	doc-analyzer config show $(CONFIG)
-
-config-test:
-	doc-analyzer config test $(CONFIG)
-
-# Cache
-cache-stats:
-	doc-analyzer cache-stats
-
-cache-clear:
-	doc-analyzer cache-clear
-
-# Build portable executable
-# Note: Builds for current platform only. For cross-platform, build on each OS.
-build:
-	@echo "Building portable executable..."
-	@echo "Config will be bundled from: ./config.yaml"
-	@echo ""
-	@if [ ! -f config.yaml ]; then echo "ERROR: config.yaml not found"; exit 1; fi
-	pyinstaller doc_analyzer.spec --clean --noconfirm
-	@echo ""
-	@echo "Build complete! Executable at: dist/doc-analyzer"
-	@echo ""
-	@echo "Usage: ./dist/doc-analyzer /path/to/documents"
-	@ls -lh dist/doc-analyzer* 2>/dev/null || true
-
-build-clean:
-	rm -rf build/ dist/ *.spec.bak
-	find . -name "*.pyc" -delete
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+# Development setup
+setup: frontend-install db-up
+	@echo "Development environment ready!"
+	@echo "Run 'make dev' to start the backend server"
+	@echo "Run 'make frontend-dev' in another terminal for frontend"
