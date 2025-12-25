@@ -38,6 +38,8 @@ type Statement struct {
 	DocumentID string    `json:"document_id"`
 	Text       string    `json:"text"`
 	Position   int       `json:"position"`
+	Line       int       `json:"line"`
+	File       string    `json:"file"`
 	Embedding  []float32 `json:"-"`
 }
 
