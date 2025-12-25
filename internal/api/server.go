@@ -14,19 +14,22 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"github.com/todmy/doc-analyzer/internal/auth"
 	"github.com/todmy/doc-analyzer/internal/storage"
 )
 
 type Server struct {
 	router        *chi.Mux
 	db            *sql.DB
+	authService   auth.Service
 	projectRepo   storage.ProjectRepository
 	documentRepo  storage.DocumentRepository
 	statementRepo storage.StatementRepository
 }
 
 type ServerConfig struct {
-	DB *sql.DB
+	DB        *sql.DB
+	JWTSecret string
 }
 
 func NewServer(config ServerConfig) *Server {
@@ -45,9 +48,20 @@ func NewServer(config ServerConfig) *Server {
 		MaxAge:           300,
 	}))
 
+	// Initialize auth service
+	userRepo := auth.NewPostgresRepository(config.DB)
+	jwtSecret := config.JWTSecret
+	if jwtSecret == "" {
+		jwtSecret = "development-secret-change-in-prod"
+	}
+	authService := auth.NewJWTService(auth.Config{
+		SecretKey: jwtSecret,
+	}, userRepo)
+
 	s := &Server{
 		router:        r,
 		db:            config.DB,
+		authService:   authService,
 		projectRepo:   storage.NewPostgresProjectRepository(config.DB),
 		documentRepo:  storage.NewPostgresDocumentRepository(config.DB),
 		statementRepo: storage.NewPostgresStatementRepository(config.DB),

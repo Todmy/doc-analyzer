@@ -31,8 +31,11 @@ func main() {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 
+	jwtSecret := os.Getenv("JWT_SECRET")
+
 	server := api.NewServer(api.ServerConfig{
-		DB: db,
+		DB:        db,
+		JWTSecret: jwtSecret,
 	})
 
 	fmt.Printf("Starting doc-analyzer server on port %s\n", port)
