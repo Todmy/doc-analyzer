@@ -56,6 +56,7 @@ CREATE TABLE statements (
     document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
     position INTEGER NOT NULL,
+    line INTEGER NOT NULL DEFAULT 0,
     embedding vector(1536), -- OpenAI text-embedding-3-small dimension
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
