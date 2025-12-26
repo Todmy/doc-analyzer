@@ -39,7 +39,9 @@ export default function Visualization({ points, clusters, viewMode, selectedClus
   // Group points by cluster
   const clusterMap = new Map<string, Point[]>()
   points.forEach((point) => {
-    const clusterId = point.cluster_id || 'unclustered'
+    const clusterId = point.cluster_id !== undefined && point.cluster_id !== null
+      ? String(point.cluster_id)
+      : 'unclustered'
     if (!clusterMap.has(clusterId)) {
       clusterMap.set(clusterId, [])
     }
@@ -49,13 +51,13 @@ export default function Visualization({ points, clusters, viewMode, selectedClus
   const traces: Plotly.Data[] = []
 
   clusterMap.forEach((clusterPoints, clusterId) => {
-    const clusterIndex = clusters.findIndex((c) => c.id === clusterId)
+    const clusterIndex = clusters.findIndex((c) => String(c.id) === clusterId)
     const color = clusterIndex >= 0 ? COLORS[clusterIndex % COLORS.length] : '#6b7280'
     const cluster = clusters[clusterIndex]
     const name = cluster ? `Cluster: ${cluster.keywords.slice(0, 3).join(', ')}` : 'Unclustered'
 
-    // Determine opacity based on selection
-    const isSelected = selectedClusterId === null || selectedClusterId === undefined || clusterId === selectedClusterId
+    // Determine opacity based on selection (compare as strings)
+    const isSelected = selectedClusterId === null || selectedClusterId === undefined || clusterId === String(selectedClusterId)
     const opacity = isSelected ? 0.9 : 0.15
     const markerSize = viewMode === '3d' ? 6 : 10
 
