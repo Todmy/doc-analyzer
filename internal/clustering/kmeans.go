@@ -147,8 +147,12 @@ func kMeansPlusPlusInit(data [][]float64, k int) [][]float64 {
 	n := len(data)
 	centroids := make([][]float64, 0, k)
 
+	// Create deterministic seed based on data to ensure reproducible results
+	seed := computeDataSeed(data)
+	rng := rand.New(rand.NewSource(seed))
+
 	// Choose first centroid randomly
-	firstIdx := rand.Intn(n)
+	firstIdx := rng.Intn(n)
 	centroids = append(centroids, copySlice(data[firstIdx]))
 
 	// Choose remaining centroids with probability proportional to distance squared
@@ -169,7 +173,7 @@ func kMeansPlusPlusInit(data [][]float64, k int) [][]float64 {
 		}
 
 		// Choose next centroid with probability proportional to distance squared
-		r := rand.Float64() * totalDist
+		r := rng.Float64() * totalDist
 		cumSum := 0.0
 		for j, d := range distances {
 			cumSum += d
@@ -181,6 +185,27 @@ func kMeansPlusPlusInit(data [][]float64, k int) [][]float64 {
 	}
 
 	return centroids
+}
+
+// computeDataSeed creates a deterministic seed from the data
+func computeDataSeed(data [][]float64) int64 {
+	if len(data) == 0 {
+		return 42
+	}
+	// Use a simple hash based on data size and sample values
+	seed := int64(len(data))
+	if len(data[0]) > 0 {
+		seed += int64(len(data[0])) * 1000
+		// Sample some values to create variation
+		seed += int64(data[0][0] * 1000000)
+		if len(data) > 1 {
+			seed += int64(data[len(data)/2][0] * 1000000)
+		}
+		if len(data) > 2 {
+			seed += int64(data[len(data)-1][0] * 1000000)
+		}
+	}
+	return seed
 }
 
 func squaredEuclideanDistance(a, b []float64) float64 {
