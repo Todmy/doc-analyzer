@@ -53,12 +53,14 @@ export default function Dashboard() {
     }
   }
 
+  const needsSemanticWords = method === 'semantic' && semanticWords.length === 0
+
   const { data: visualization, isLoading } = useQuery({
     queryKey: ['visualization', projectId, method, semanticWords, viewMode],
     queryFn: async () => {
       const params = new URLSearchParams({ method })
       params.set('dimensions', viewMode === '3d' ? '3' : '2')
-      if (method === 'semantic' && semanticWords.length > 0) {
+      if (method === 'semantic') {
         semanticWords.forEach(w => params.append('words', w))
       }
 
@@ -73,6 +75,7 @@ export default function Dashboard() {
       if (!response.ok) throw new Error('Failed to fetch visualization')
       return response.json()
     },
+    enabled: !needsSemanticWords,
   })
 
   const { data: clusters } = useQuery({
@@ -212,7 +215,11 @@ export default function Dashboard() {
 
             {/* Visualization */}
             <div className="flex-1 p-4">
-              {isLoading ? (
+              {needsSemanticWords ? (
+                <div className="h-full flex items-center justify-center text-gray-400">
+                  Enter semantic axis words above to visualize
+                </div>
+              ) : isLoading ? (
                 <div className="h-full flex items-center justify-center text-gray-400">
                   Loading visualization...
                 </div>
