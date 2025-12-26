@@ -6,12 +6,25 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/pgvector/pgvector-go"
 
 	"github.com/todmy/doc-analyzer/internal/storage"
 )
+
+// truncateUTF8 safely truncates a string to maxBytes without breaking UTF-8 sequences
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Walk backwards from maxBytes to find a valid UTF-8 boundary
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes]
+}
 
 const (
 	minStatementLength = 50
@@ -58,7 +71,7 @@ func extractJSONStrings(data interface{}, documentID uuid.UUID, statements *[]*s
 		text := strings.TrimSpace(v)
 		if len(text) >= minStatementLength {
 			if len(text) > maxStatementLength {
-				text = text[:maxStatementLength] + "..."
+				text = truncateUTF8(text, maxStatementLength) + "..."
 			}
 			*statements = append(*statements, &storage.Statement{
 				DocumentID: documentID,
@@ -90,7 +103,7 @@ func extractStatementsFromCSV(content string, documentID uuid.UUID) []*storage.S
 
 		if len(rowText) >= minStatementLength {
 			if len(rowText) > maxStatementLength {
-				rowText = rowText[:maxStatementLength] + "..."
+				rowText = truncateUTF8(rowText, maxStatementLength) + "..."
 			}
 			statements = append(statements, &storage.Statement{
 				DocumentID: documentID,
@@ -142,7 +155,7 @@ func extractStatementsFromText(content string, documentID uuid.UUID) []*storage.
 
 		// Truncate if too long
 		if len(para) > maxStatementLength {
-			para = para[:maxStatementLength] + "..."
+			para = truncateUTF8(para, maxStatementLength) + "..."
 		}
 
 		statements = append(statements, &storage.Statement{
