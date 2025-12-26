@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -114,11 +115,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sanitize content to valid UTF-8 (replaces invalid sequences with replacement char)
+	sanitizedContent := strings.ToValidUTF8(string(content), "�")
+
 	// Create new document
 	doc := &storage.Document{
 		ProjectID:   pid,
 		Filename:    header.Filename,
-		Content:     string(content),
+		Content:     sanitizedContent,
 		ContentHash: hashStr,
 	}
 
