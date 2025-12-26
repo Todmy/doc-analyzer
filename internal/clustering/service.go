@@ -159,12 +159,13 @@ func (s *Service) computeDensity(embeddings [][]float32, labels []int, clusterID
 		return 0
 	}
 
-	// Return inverse of average distance (higher = denser)
+	// Return normalized density (0-1 range, higher = denser)
 	avgDist := totalDist / float64(count)
 	if avgDist == 0 {
 		return 1.0
 	}
-	return 1.0 / avgDist
+	// Use 1/(1+avgDist) to normalize to 0-1 range
+	return 1.0 / (1.0 + avgDist)
 }
 
 // findElbow finds the elbow point in inertia curve
