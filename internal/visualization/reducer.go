@@ -27,6 +27,9 @@ func (r *PCAReducer) Name() string {
 	return "pca"
 }
 
+// maxPCADimensions limits input dimensions for performance (SVD is O(n*d²))
+const maxPCADimensions = 256
+
 // Reduce performs PCA dimensionality reduction
 func (r *PCAReducer) Reduce(embeddings [][]float32, dims int) ([][]float64, error) {
 	if len(embeddings) == 0 {
@@ -36,6 +39,11 @@ func (r *PCAReducer) Reduce(embeddings [][]float32, dims int) ([][]float64, erro
 	n := len(embeddings)
 	d := len(embeddings[0])
 
+	// Truncate input dimensions for performance (keeps most variance in first dims)
+	if d > maxPCADimensions {
+		d = maxPCADimensions
+	}
+
 	if dims > d {
 		dims = d
 	}
@@ -43,11 +51,11 @@ func (r *PCAReducer) Reduce(embeddings [][]float32, dims int) ([][]float64, erro
 		dims = n
 	}
 
-	// Convert to float64 matrix
+	// Convert to float64 matrix (with dimension truncation)
 	data := make([]float64, n*d)
 	for i, emb := range embeddings {
-		for j, v := range emb {
-			data[i*d+j] = float64(v)
+		for j := 0; j < d; j++ {
+			data[i*d+j] = float64(emb[j])
 		}
 	}
 	X := mat.NewDense(n, d, data)

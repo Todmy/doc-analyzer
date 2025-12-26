@@ -6,7 +6,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/todmy/doc-analyzer/internal/clustering"
 	"github.com/todmy/doc-analyzer/internal/storage"
 	"github.com/todmy/doc-analyzer/internal/visualization"
 )
@@ -46,6 +45,10 @@ type SemanticAxesRequest struct {
 	Words []string `json:"words"`
 }
 
+// maxVisualizationPoints is the maximum number of points to render for performance
+// PCA/SVD is O(n*d²) so we limit to 1000 for acceptable response times
+const maxVisualizationPoints = 1000
+
 // handleGetVisualization returns visualization data for a project
 func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
@@ -82,6 +85,22 @@ func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Sample statements if too many for performance
+	if len(statements) > maxVisualizationPoints {
+		statements = sampleStatements(statements, maxVisualizationPoints)
+	}
+
+	// Pre-load documents to avoid N+1 queries
+	docs, err := s.documentRepo.GetByProjectID(r.Context(), pid)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to fetch documents")
+		return
+	}
+	docMap := make(map[string]string, len(docs))
+	for _, doc := range docs {
+		docMap[doc.ID.String()] = doc.Filename
+	}
+
 	if len(statements) == 0 {
 		respondJSON(w, http.StatusOK, VisualizationResponse{
 			Points:     []VisualizationPoint{},
@@ -108,17 +127,10 @@ func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Reque
 	// Convert to model statements for anomaly detection
 	modelStatements := s.convertToModelStatements(statements)
 
-	// Run clustering based on method
-	var clusterResult *clustering.ClusterResult
-	if method == "semantic" {
-		// For semantic mode, cluster on projected coordinates
-		coords := extractCoords(visResult.Points, dimensions)
-		texts := extractTexts(statements)
-		clusterResult = s.clusteringService.AutoClusterCoordinates(coords, texts, 10)
-	} else {
-		// For PCA mode, cluster on full embeddings
-		clusterResult = s.clusteringService.AutoCluster(modelStatements, 10)
-	}
+	// Run clustering on projected coordinates (much faster than full embeddings)
+	coords := extractCoords(visResult.Points, dimensions)
+	texts := extractTexts(statements)
+	clusterResult := s.clusteringService.AutoClusterCoordinates(coords, texts, 10)
 
 	// Get anomaly scores
 	anomalyResults := s.anomalyService.DetectAnomalies(modelStatements)
@@ -130,12 +142,8 @@ func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Reque
 	// Build visualization points
 	points := make([]VisualizationPoint, len(statements))
 	for i, stmt := range statements {
-		// Get document filename
-		doc, _ := s.documentRepo.GetByID(r.Context(), stmt.DocumentID)
-		filename := ""
-		if doc != nil {
-			filename = doc.Filename
-		}
+		// Get document filename from pre-loaded map
+		filename := docMap[stmt.DocumentID.String()]
 
 		// Truncate text for preview
 		preview := stmt.Text
@@ -219,6 +227,22 @@ func (s *Server) handleSetAxesImpl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sample statements if too many for performance
+	if len(statements) > maxVisualizationPoints {
+		statements = sampleStatements(statements, maxVisualizationPoints)
+	}
+
+	// Pre-load documents to avoid N+1 queries
+	docs, err := s.documentRepo.GetByProjectID(r.Context(), pid)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to fetch documents")
+		return
+	}
+	docMap := make(map[string]string, len(docs))
+	for _, doc := range docs {
+		docMap[doc.ID.String()] = doc.Filename
+	}
+
 	if len(statements) == 0 {
 		respondJSON(w, http.StatusOK, VisualizationResponse{
 			Points:     []VisualizationPoint{},
@@ -261,11 +285,8 @@ func (s *Server) handleSetAxesImpl(w http.ResponseWriter, r *http.Request) {
 	// Build visualization points
 	points := make([]VisualizationPoint, len(statements))
 	for i, stmt := range statements {
-		doc, _ := s.documentRepo.GetByID(r.Context(), stmt.DocumentID)
-		filename := ""
-		if doc != nil {
-			filename = doc.Filename
-		}
+		// Get document filename from pre-loaded map
+		filename := docMap[stmt.DocumentID.String()]
 
 		preview := stmt.Text
 		if len(preview) > 100 {
@@ -331,4 +352,20 @@ func extractTexts(statements []*storage.Statement) []string {
 		texts[i] = stmt.Text
 	}
 	return texts
+}
+
+// sampleStatements returns a uniformly distributed sample of statements
+func sampleStatements(statements []*storage.Statement, maxCount int) []*storage.Statement {
+	if len(statements) <= maxCount {
+		return statements
+	}
+
+	// Use deterministic sampling by taking evenly spaced indices
+	step := float64(len(statements)) / float64(maxCount)
+	sampled := make([]*storage.Statement, maxCount)
+	for i := 0; i < maxCount; i++ {
+		idx := int(float64(i) * step)
+		sampled[i] = statements[idx]
+	}
+	return sampled
 }
