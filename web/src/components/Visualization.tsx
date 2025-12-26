@@ -19,6 +19,7 @@ interface Props {
   points: Point[]
   clusters: Cluster[]
   viewMode: '2d' | '3d'
+  selectedClusterId?: string | null
 }
 
 const COLORS = [
@@ -26,7 +27,7 @@ const COLORS = [
   '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
 ]
 
-export default function Visualization({ points, clusters, viewMode }: Props) {
+export default function Visualization({ points, clusters, viewMode, selectedClusterId }: Props) {
   if (points.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-gray-400">
@@ -53,6 +54,11 @@ export default function Visualization({ points, clusters, viewMode }: Props) {
     const cluster = clusters[clusterIndex]
     const name = cluster ? `Cluster: ${cluster.keywords.slice(0, 3).join(', ')}` : 'Unclustered'
 
+    // Determine opacity based on selection
+    const isSelected = selectedClusterId === null || selectedClusterId === undefined || clusterId === selectedClusterId
+    const opacity = isSelected ? 0.9 : 0.15
+    const markerSize = viewMode === '3d' ? 6 : 10
+
     if (viewMode === '3d') {
       traces.push({
         type: 'scatter3d',
@@ -64,9 +70,9 @@ export default function Visualization({ points, clusters, viewMode }: Props) {
         text: clusterPoints.map((p) => p.preview || ''),
         hoverinfo: 'text',
         marker: {
-          size: 6,
+          size: markerSize,
           color,
-          opacity: 0.8,
+          opacity,
           line: {
             color: clusterPoints.map((p) =>
               (p.anomaly_score || 0) > 0.7 ? '#ef4444' : 'transparent'
@@ -85,9 +91,9 @@ export default function Visualization({ points, clusters, viewMode }: Props) {
         text: clusterPoints.map((p) => p.preview || ''),
         hoverinfo: 'text',
         marker: {
-          size: 10,
+          size: markerSize,
           color,
-          opacity: 0.8,
+          opacity,
           line: {
             color: clusterPoints.map((p) =>
               (p.anomaly_score || 0) > 0.7 ? '#ef4444' : 'transparent'
@@ -105,6 +111,7 @@ export default function Visualization({ points, clusters, viewMode }: Props) {
     font: { color: '#9ca3af' },
     margin: { l: 40, r: 40, t: 40, b: 40 },
     showlegend: true,
+    dragmode: 'pan',
     legend: {
       x: 0,
       y: 1,
@@ -138,6 +145,7 @@ export default function Visualization({ points, clusters, viewMode }: Props) {
       config={{
         responsive: true,
         displayModeBar: true,
+        scrollZoom: true,
         modeBarButtonsToRemove: ['lasso2d', 'select2d'],
       }}
       style={{ width: '100%', height: '100%' }}

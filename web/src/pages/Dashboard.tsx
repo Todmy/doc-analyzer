@@ -5,7 +5,7 @@ import Visualization from '../components/Visualization'
 import ClusterPanel from '../components/ClusterPanel'
 import SemanticAxes from '../components/SemanticAxes'
 
-type Tab = 'clusters' | 'similar' | 'anomalies' | 'contradictions'
+type Tab = 'clusters' | 'similar' | 'anomalies' | 'contradictions' | 'documents'
 
 export default function Dashboard() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -14,6 +14,7 @@ export default function Dashboard() {
   const [method, setMethod] = useState<'pca' | 'semantic'>('pca')
   const [semanticWords, setSemanticWords] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
 
@@ -43,6 +44,7 @@ export default function Dashboard() {
       // Refresh data after upload
       queryClient.invalidateQueries({ queryKey: ['visualization', projectId] })
       queryClient.invalidateQueries({ queryKey: ['clusters', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['documents', projectId] })
     } finally {
       setUploading(false)
       if (fileInputRef.current) {
@@ -52,9 +54,10 @@ export default function Dashboard() {
   }
 
   const { data: visualization, isLoading } = useQuery({
-    queryKey: ['visualization', projectId, method, semanticWords],
+    queryKey: ['visualization', projectId, method, semanticWords, viewMode],
     queryFn: async () => {
       const params = new URLSearchParams({ method })
+      params.set('dimensions', viewMode === '3d' ? '3' : '2')
       if (method === 'semantic' && semanticWords.length > 0) {
         semanticWords.forEach(w => params.append('words', w))
       }
@@ -85,8 +88,41 @@ export default function Dashboard() {
     },
   })
 
+  const { data: documents } = useQuery({
+    queryKey: ['documents', projectId],
+    queryFn: async () => {
+      const response = await fetch(`/api/v1/projects/${projectId}/documents`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      })
+      if (!response.ok) throw new Error('Failed to fetch documents')
+      return response.json()
+    },
+  })
+
+  const handleDeleteDocument = async (documentId: string) => {
+    if (!confirm('Are you sure you want to delete this document?')) return
+
+    const response = await fetch(`/api/v1/projects/${projectId}/documents/${documentId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      },
+    })
+
+    if (response.ok) {
+      queryClient.invalidateQueries({ queryKey: ['documents', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['visualization', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['clusters', projectId] })
+    } else {
+      alert('Failed to delete document')
+    }
+  }
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'clusters', label: 'Clusters' },
+    { id: 'documents', label: 'Documents' },
     { id: 'similar', label: 'Similar Pairs' },
     { id: 'anomalies', label: 'Anomalies' },
     { id: 'contradictions', label: 'Contradictions' },
@@ -185,6 +221,7 @@ export default function Dashboard() {
                   points={visualization?.points || []}
                   clusters={clusters || []}
                   viewMode={viewMode}
+                  selectedClusterId={selectedClusterId}
                 />
               )}
             </div>
@@ -213,7 +250,33 @@ export default function Dashboard() {
           {/* Tab content */}
           <div className="flex-1 overflow-y-auto p-4">
             {activeTab === 'clusters' && (
-              <ClusterPanel clusters={clusters || []} />
+              <ClusterPanel
+                clusters={clusters || []}
+                selectedClusterId={selectedClusterId}
+                onClusterClick={setSelectedClusterId}
+              />
+            )}
+            {activeTab === 'documents' && (
+              <div className="space-y-2">
+                {(!documents || documents.length === 0) ? (
+                  <div className="text-gray-400 text-sm">No documents uploaded yet.</div>
+                ) : (
+                  documents.map((doc: { id: string; filename: string }) => (
+                    <div
+                      key={doc.id}
+                      className="flex items-center justify-between bg-gray-700/50 rounded-lg p-3"
+                    >
+                      <span className="text-sm truncate flex-1 mr-2">{doc.filename}</span>
+                      <button
+                        onClick={() => handleDeleteDocument(doc.id)}
+                        className="text-red-400 hover:text-red-300 text-sm px-2"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             )}
             {activeTab === 'similar' && (
               <div className="text-gray-400 text-sm">Similar pairs will appear here</div>

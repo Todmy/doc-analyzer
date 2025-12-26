@@ -68,6 +68,9 @@ func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Reque
 		method = "pca"
 	}
 
+	// Parse words parameter for semantic method
+	words := r.URL.Query()["words"]
+
 	// Get statements for project
 	statements, err := s.statementRepo.GetByProjectID(r.Context(), pid)
 	if err != nil {
@@ -92,7 +95,7 @@ func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Get visualization coordinates
-	visResult, err := s.visualizationService.GetVisualization(r.Context(), embeddings, method, dimensions, nil)
+	visResult, err := s.visualizationService.GetVisualization(r.Context(), embeddings, method, dimensions, words)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to generate visualization")
 		return
