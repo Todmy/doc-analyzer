@@ -135,7 +135,12 @@ func (s *Server) handleAnalyzeImpl(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetClusters returns clustering results for a project
+// Deprecated: Use GET /api/v1/projects/{projectID}/visualization instead
 func (s *Server) handleGetClustersImpl(w http.ResponseWriter, r *http.Request) {
+	// Add deprecation headers
+	w.Header().Set("Deprecation", "true")
+	w.Header().Set("Link", `</api/v1/projects/{projectID}/visualization>; rel="successor-version"`)
+
 	projectID := chi.URLParam(r, "projectID")
 	if projectID == "" {
 		respondError(w, http.StatusBadRequest, "project id is required")

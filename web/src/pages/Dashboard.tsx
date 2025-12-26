@@ -41,9 +41,8 @@ export default function Dashboard() {
           alert(`Failed to upload ${file.name}: ${error.error || 'Unknown error'}`)
         }
       }
-      // Refresh data after upload
+      // Refresh data after upload (clusters are included in visualization response)
       queryClient.invalidateQueries({ queryKey: ['visualization', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['clusters', projectId] })
       queryClient.invalidateQueries({ queryKey: ['documents', projectId] })
     } finally {
       setUploading(false)
@@ -78,18 +77,8 @@ export default function Dashboard() {
     enabled: !needsSemanticWords,
   })
 
-  const { data: clusters } = useQuery({
-    queryKey: ['clusters', projectId],
-    queryFn: async () => {
-      const response = await fetch(`/api/v1/projects/${projectId}/clusters`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      })
-      if (!response.ok) throw new Error('Failed to fetch clusters')
-      return response.json()
-    },
-  })
+  // Clusters are now included in the visualization response
+  const clusters = visualization?.clusters || []
 
   const { data: documents } = useQuery({
     queryKey: ['documents', projectId],
@@ -117,7 +106,6 @@ export default function Dashboard() {
     if (response.ok) {
       queryClient.invalidateQueries({ queryKey: ['documents', projectId] })
       queryClient.invalidateQueries({ queryKey: ['visualization', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['clusters', projectId] })
     } else {
       alert('Failed to delete document')
     }
@@ -226,7 +214,7 @@ export default function Dashboard() {
               ) : (
                 <Visualization
                   points={visualization?.points || []}
-                  clusters={clusters || []}
+                  clusters={clusters}
                   viewMode={viewMode}
                   selectedClusterId={selectedClusterId}
                 />
@@ -258,7 +246,7 @@ export default function Dashboard() {
           <div className="flex-1 overflow-y-auto p-4">
             {activeTab === 'clusters' && (
               <ClusterPanel
-                clusters={clusters || []}
+                clusters={clusters}
                 selectedClusterId={selectedClusterId}
                 onClusterClick={setSelectedClusterId}
               />

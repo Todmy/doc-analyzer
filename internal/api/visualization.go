@@ -6,6 +6,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/todmy/doc-analyzer/internal/clustering"
+	"github.com/todmy/doc-analyzer/internal/storage"
+	"github.com/todmy/doc-analyzer/internal/visualization"
 )
 
 // VisualizationResponse represents the visualization data
@@ -35,6 +38,7 @@ type ClusterInfo struct {
 	Keywords []string `json:"keywords"`
 	Color    string   `json:"color"`
 	Size     int      `json:"size"`
+	Density  float64  `json:"density"`
 }
 
 // SemanticAxesRequest represents a request to set semantic axes
@@ -101,11 +105,20 @@ func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Convert to model statements for clustering and anomaly detection
+	// Convert to model statements for anomaly detection
 	modelStatements := s.convertToModelStatements(statements)
 
-	// Run clustering to get cluster assignments
-	clusterResult := s.clusteringService.AutoCluster(modelStatements, 10)
+	// Run clustering based on method
+	var clusterResult *clustering.ClusterResult
+	if method == "semantic" {
+		// For semantic mode, cluster on projected coordinates
+		coords := extractCoords(visResult.Points, dimensions)
+		texts := extractTexts(statements)
+		clusterResult = s.clusteringService.AutoClusterCoordinates(coords, texts, 10)
+	} else {
+		// For PCA mode, cluster on full embeddings
+		clusterResult = s.clusteringService.AutoCluster(modelStatements, 10)
+	}
 
 	// Get anomaly scores
 	anomalyResults := s.anomalyService.DetectAnomalies(modelStatements)
@@ -156,6 +169,7 @@ func (s *Server) handleGetVisualizationImpl(w http.ResponseWriter, r *http.Reque
 			Keywords: keywords,
 			Color:    color,
 			Size:     c.Size,
+			Density:  c.Density,
 		}
 	}
 
@@ -229,11 +243,13 @@ func (s *Server) handleSetAxesImpl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to model statements for clustering
+	// Convert to model statements for anomaly detection
 	modelStatements := s.convertToModelStatements(statements)
 
-	// Run clustering
-	clusterResult := s.clusteringService.AutoCluster(modelStatements, 10)
+	// Run clustering on projected coordinates (semantic mode)
+	coords := extractCoords(visResult.Points, len(req.Words))
+	texts := extractTexts(statements)
+	clusterResult := s.clusteringService.AutoClusterCoordinates(coords, texts, 10)
 
 	// Get anomaly scores
 	anomalyResults := s.anomalyService.DetectAnomalies(modelStatements)
@@ -282,6 +298,7 @@ func (s *Server) handleSetAxesImpl(w http.ResponseWriter, r *http.Request) {
 			Keywords: keywords,
 			Color:    color,
 			Size:     c.Size,
+			Density:  c.Density,
 		}
 	}
 
@@ -292,4 +309,26 @@ func (s *Server) handleSetAxesImpl(w http.ResponseWriter, r *http.Request) {
 		Method:     "semantic",
 		AxisLabels: req.Words,
 	})
+}
+
+// extractCoords extracts 2D or 3D coordinates from visualization points
+func extractCoords(points []visualization.Point, dimensions int) [][]float64 {
+	coords := make([][]float64, len(points))
+	for i, p := range points {
+		if dimensions == 3 {
+			coords[i] = []float64{p.X, p.Y, p.Z}
+		} else {
+			coords[i] = []float64{p.X, p.Y}
+		}
+	}
+	return coords
+}
+
+// extractTexts extracts text content from statements
+func extractTexts(statements []*storage.Statement) []string {
+	texts := make([]string, len(statements))
+	for i, stmt := range statements {
+		texts[i] = stmt.Text
+	}
+	return texts
 }

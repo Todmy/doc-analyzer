@@ -138,6 +138,90 @@ func (s *Service) AutoCluster(statements []models.Statement, maxK int) *ClusterR
 	return s.ClusterStatements(statements, optimalK)
 }
 
+// ClusterCoordinates clusters points using their 2D/3D coordinates
+func (s *Service) ClusterCoordinates(coords [][]float64, texts []string, k int) *ClusterResult {
+	if len(coords) == 0 {
+		return &ClusterResult{}
+	}
+
+	if k <= 0 {
+		k = s.defaultK
+	}
+	if k > len(coords) {
+		k = len(coords)
+	}
+
+	// Convert float64 coords to float32 for K-means
+	embeddings := make([][]float32, len(coords))
+	for i, coord := range coords {
+		embeddings[i] = make([]float32, len(coord))
+		for j, v := range coord {
+			embeddings[i][j] = float32(v)
+		}
+	}
+
+	// Run K-means
+	km := NewKMeans(k)
+	labels := km.Fit(embeddings)
+
+	// Extract keywords for each cluster
+	clusterKeywords := s.keywordExtractor.ExtractClusterKeywords(texts, labels, k, s.keywordsPerCluster)
+
+	// Build cluster metadata
+	clusters := make([]Cluster, k)
+	clusterSizes := make([]int, k)
+	for _, label := range labels {
+		clusterSizes[label]++
+	}
+
+	centroids := km.GetCentroids()
+	for i := 0; i < k; i++ {
+		clusters[i] = Cluster{
+			ID:       i,
+			Centroid: centroids[i],
+			Size:     clusterSizes[i],
+			Keywords: clusterKeywords[i],
+			Density:  s.computeDensity(embeddings, labels, i, centroids[i]),
+		}
+	}
+
+	return &ClusterResult{
+		Clusters: clusters,
+		Labels:   labels,
+		K:        k,
+		Inertia:  km.Inertia,
+	}
+}
+
+// AutoClusterCoordinates determines optimal k using elbow method on coordinate space
+func (s *Service) AutoClusterCoordinates(coords [][]float64, texts []string, maxK int) *ClusterResult {
+	if len(coords) == 0 {
+		return &ClusterResult{}
+	}
+
+	if maxK <= 0 {
+		maxK = 10
+	}
+	if maxK > len(coords) {
+		maxK = len(coords)
+	}
+
+	// Convert float64 coords to float32 for elbow method
+	embeddings := make([][]float32, len(coords))
+	for i, coord := range coords {
+		embeddings[i] = make([]float32, len(coord))
+		for j, v := range coord {
+			embeddings[i][j] = float32(v)
+		}
+	}
+
+	// Find optimal k using elbow method
+	inertias := ElbowMethod(embeddings, maxK)
+	optimalK := findElbow(inertias)
+
+	return s.ClusterCoordinates(coords, texts, optimalK)
+}
+
 // computeDensity calculates the average distance of cluster members to centroid
 func (s *Service) computeDensity(embeddings [][]float32, labels []int, clusterID int, centroid []float32) float64 {
 	totalDist := 0.0
