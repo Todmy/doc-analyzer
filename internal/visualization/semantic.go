@@ -7,9 +7,8 @@ import (
 
 // SemanticAxis represents a user-defined semantic dimension
 type SemanticAxis struct {
-	Word      string  `json:"word"`
-	Dimension int     `json:"dimension"`
-	MaxValue  float32 `json:"max_value"`
+	Word      string    `json:"word"`
+	Embedding []float32 `json:"-"` // Full embedding vector for projection
 }
 
 // PresetAxis represents a preset axis configuration
@@ -67,12 +66,9 @@ func (p *SemanticProjector) FindSemanticAxis(ctx context.Context, word string) (
 		return nil, fmt.Errorf("embed word %q: %w", word, err)
 	}
 
-	dim, maxVal := findMaxDimension(embedding)
-
 	return &SemanticAxis{
 		Word:      word,
-		Dimension: dim,
-		MaxValue:  maxVal,
+		Embedding: embedding,
 	}, nil
 }
 
@@ -91,7 +87,7 @@ func (p *SemanticProjector) FindSemanticAxes(ctx context.Context, words []string
 	return axes, nil
 }
 
-// ProjectToAxes projects embeddings onto semantic axes
+// ProjectToAxes projects embeddings onto semantic axes using dot product
 func ProjectToAxes(embeddings [][]float32, axes []SemanticAxis) [][]float64 {
 	if len(embeddings) == 0 || len(axes) == 0 {
 		return nil
@@ -102,10 +98,8 @@ func ProjectToAxes(embeddings [][]float32, axes []SemanticAxis) [][]float64 {
 	for i, emb := range embeddings {
 		result[i] = make([]float64, len(axes))
 		for j, axis := range axes {
-			if axis.Dimension < len(emb) {
-				// Project onto the semantic dimension
-				result[i][j] = float64(emb[axis.Dimension])
-			}
+			// Project using dot product (cosine similarity without normalization)
+			result[i][j] = dotProduct(emb, axis.Embedding)
 		}
 	}
 
@@ -113,24 +107,19 @@ func ProjectToAxes(embeddings [][]float32, axes []SemanticAxis) [][]float64 {
 	return normalizeCoordinates(result)
 }
 
-// findMaxDimension finds the dimension with the maximum absolute value
-func findMaxDimension(embedding []float32) (int, float32) {
-	maxIdx := 0
-	maxVal := float32(0)
-
-	for i, v := range embedding {
-		absV := v
-		if absV < 0 {
-			absV = -absV
-		}
-		if absV > maxVal {
-			maxVal = absV
-			maxIdx = i
-		}
+// dotProduct computes the dot product of two vectors
+func dotProduct(a, b []float32) float64 {
+	sum := float64(0)
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
 	}
-
-	return maxIdx, embedding[maxIdx]
+	for i := 0; i < n; i++ {
+		sum += float64(a[i]) * float64(b[i])
+	}
+	return sum
 }
+
 
 // SemanticReducer implements Reducer using semantic axes
 type SemanticReducer struct {
