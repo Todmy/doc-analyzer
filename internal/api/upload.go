@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -26,7 +28,9 @@ type UploadResponse struct {
 
 // handleUpload handles document file uploads
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
 	projectID := chi.URLParam(r, "projectID")
+	log.Printf("[upload] starting upload for project %s", projectID)
 	if projectID == "" {
 		respondError(w, http.StatusBadRequest, "project id is required")
 		return
@@ -83,9 +87,11 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Read file content
 	content, err := io.ReadAll(file)
 	if err != nil {
+		log.Printf("[upload] failed to read file: %v", err)
 		respondError(w, http.StatusInternalServerError, "failed to read file")
 		return
 	}
+	log.Printf("[upload] read file %s (%.2f KB)", header.Filename, float64(len(content))/1024)
 
 	// Calculate content hash
 	hash := sha256.Sum256(content)
@@ -122,22 +128,32 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract statements from document
+	extractStart := time.Now()
 	statements := extractStatements(doc.Content, doc.ID, ext)
+	log.Printf("[upload] extracted %d statements in %v", len(statements), time.Since(extractStart))
 
 	if len(statements) > 0 {
 		// Generate embeddings for statements
+		embeddingStart := time.Now()
+		log.Printf("[upload] starting embedding generation for %d statements...", len(statements))
 		if err := s.generateEmbeddingsForStatements(r.Context(), statements); err != nil {
-			// Log error but don't fail the upload
-			// Statements will be stored without embeddings
+			log.Printf("[upload] embedding generation failed after %v: %v", time.Since(embeddingStart), err)
+			// Continue - statements will be stored without embeddings
+		} else {
+			log.Printf("[upload] embedding generation completed in %v", time.Since(embeddingStart))
 		}
 
 		// Save statements
+		saveStart := time.Now()
 		if err := s.statementRepo.CreateBatch(r.Context(), statements); err != nil {
+			log.Printf("[upload] failed to save statements: %v", err)
 			respondError(w, http.StatusInternalServerError, "failed to save statements")
 			return
 		}
+		log.Printf("[upload] saved %d statements in %v", len(statements), time.Since(saveStart))
 	}
 
+	log.Printf("[upload] completed upload of %s in %v", header.Filename, time.Since(startTime))
 	respondJSON(w, http.StatusCreated, UploadResponse{
 		DocumentID: doc.ID.String(),
 		Filename:   doc.Filename,

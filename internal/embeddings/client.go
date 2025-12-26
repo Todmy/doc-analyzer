@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -15,7 +16,7 @@ const (
 	defaultBaseURL       = "https://openrouter.ai/api/v1"
 	defaultBatchSize     = 100
 	defaultMaxConcurrent = 5
-	defaultTimeout       = 30 * time.Second
+	defaultTimeout       = 120 * time.Second // 2 minutes for large batches
 )
 
 // Client handles embedding generation via OpenRouter API
@@ -95,12 +96,17 @@ func (c *Client) EmbedTexts(ctx context.Context, texts []string) ([][]float32, e
 	// Split into batches
 	batches := c.splitIntoBatches(texts)
 	results := make([][]float32, len(texts))
+	totalBatches := len(batches)
+
+	log.Printf("[embeddings] processing %d texts in %d batches (batch size: %d, max concurrent: %d)",
+		len(texts), totalBatches, c.batchSize, c.maxConcurrent)
 
 	// Process batches with concurrency control
 	sem := make(chan struct{}, c.maxConcurrent)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstErr error
+	var completedBatches int
 
 	resultOffset := 0
 	for batchIdx, batch := range batches {
@@ -114,15 +120,24 @@ func (c *Client) EmbedTexts(ctx context.Context, texts []string) ([][]float32, e
 			sem <- struct{}{}        // Acquire
 			defer func() { <-sem }() // Release
 
+			batchStartTime := time.Now()
 			embeddings, err := c.embedBatch(ctx, batch)
 
 			mu.Lock()
 			defer mu.Unlock()
 
-			if err != nil && firstErr == nil {
-				firstErr = fmt.Errorf("batch %d: %w", idx, err)
+			completedBatches++
+			if err != nil {
+				log.Printf("[embeddings] batch %d/%d failed after %v: %v",
+					idx+1, totalBatches, time.Since(batchStartTime), err)
+				if firstErr == nil {
+					firstErr = fmt.Errorf("batch %d: %w", idx, err)
+				}
 				return
 			}
+
+			log.Printf("[embeddings] batch %d/%d completed in %v (%d embeddings)",
+				idx+1, totalBatches, time.Since(batchStartTime), len(embeddings))
 
 			for i, emb := range embeddings {
 				results[start+i] = emb
@@ -133,9 +148,11 @@ func (c *Client) EmbedTexts(ctx context.Context, texts []string) ([][]float32, e
 	wg.Wait()
 
 	if firstErr != nil {
+		log.Printf("[embeddings] completed with errors: %d/%d batches succeeded", completedBatches-1, totalBatches)
 		return nil, firstErr
 	}
 
+	log.Printf("[embeddings] all %d batches completed successfully", totalBatches)
 	return results, nil
 }
 
@@ -189,7 +206,7 @@ func (c *Client) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("do request: %w", err)
+		return nil, fmt.Errorf("do request (timeout=%v): %w", c.httpClient.Timeout, err)
 	}
 	defer resp.Body.Close()
 
@@ -199,6 +216,7 @@ func (c *Client) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("[embeddings] API error: status=%d, body=%s", resp.StatusCode, string(body))
 		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
